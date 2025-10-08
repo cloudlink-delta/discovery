@@ -71,7 +71,7 @@
 	}
 
 	class CloudLinkDelta_Discovery {
-		constructor() {}
+		constructor() { }
 
 		getInfo() {
 			return {
@@ -80,8 +80,131 @@
 				menuIconURI: menuIcon,
 				blockIconURI: blockIcon,
 				color1: "#0F7EBD",
-				blocks: [],
-				menus: {},
+				blocks: [
+					{
+						blockType: Scratch.BlockType.LABEL,
+						text: "Configuration",
+					},
+					{
+						opcode: "setDiscoveryServer",
+						blockType: Scratch.BlockType.COMMAND,
+						text: "Use [SERVER] as discovery server",
+						arguments: {
+							SERVER: {
+								type: Scratch.ArgumentType.STRING,
+								defaultValue: "ws://localhost:3000",
+							},
+						},
+					},
+					"---",
+					{
+						blockType: Scratch.BlockType.LABEL,
+						text: "Server info",
+					},
+					{
+						opcode: "getServerDesignation",
+						blockType: Scratch.BlockType.REPORTER,
+						text: "global server designation",
+					},
+					{
+						opcode: "getGlobalID",
+						blockType: Scratch.BlockType.REPORTER,
+						text: "my global ID",
+					},
+					"---",
+					{
+						blockType: Scratch.BlockType.LABEL,
+						text: "Resolver",
+					},
+					{
+						opcode: "searchForPeer",
+						blockType: Scratch.BlockType.COMMAND,
+						text: "resolve [NAME]",
+						arguments: {
+							NAME: {
+								type: Scratch.ArgumentType.STRING,
+								defaultValue: "B@designation",
+							},
+						},
+					},
+					{
+						opcode: "searchPeerResults",
+						blockType: Scratch.BlockType.REPORTER,
+						text: "[NAME] [OUTPUT]",
+						arguments: {
+							NAME: {
+								type: Scratch.ArgumentType.STRING,
+								defaultValue: "B@designation",
+							},
+							OUTPUT: {
+								menu: "output",
+								acceptReporters: true,
+								type: Scratch.ArgumentType.NUMBER,
+								defaultValue: "lookup successful?",
+							},
+						},
+					},
+					"---",
+					{
+						blockType: Scratch.BlockType.LABEL,
+						text: "Authentication",
+					},
+					{
+						opcode: "authServer",
+						blockType: Scratch.BlockType.COMMAND,
+						text: "[AUTHMODE] using password [PASSWORD]",
+						arguments: {
+							AUTHMODE: {
+								menu: "authmode",
+								acceptReporters: false,
+								type: Scratch.ArgumentType.NUMBER,
+								defaultValue: "register",
+							},
+							PASSWORD: {
+								type: Scratch.ArgumentType.STRING,
+								defaultValue: "change me",
+							},
+						},
+					},
+					{
+						opcode: "authResult",
+						blockType: Scratch.BlockType.REPORTER,
+						text: "was [AUTHRESULT] successful?",
+						arguments: {
+							AUTHRESULT: {
+								menu: "authresult",
+								acceptReporters: false,
+								type: Scratch.ArgumentType.NUMBER,
+								defaultValue: "registration",
+							}
+						}
+					},
+					"---",
+					{
+
+					}
+				],
+				menus: {
+					output: {
+						items: [
+							{ text: Scratch.translate("lookup successful?"), value: 0 },
+							{ text: Scratch.translate("currently online?"), value: 1 },
+							{ text: Scratch.translate("global session ID"), value: 2 },
+						]
+					},
+					authmode: {
+						items: [
+							{ text: Scratch.translate("register"), value: 0 },
+							{ text: Scratch.translate("login"), value: 1 },
+						]
+					},
+					authresult: {
+						items: [
+							{ text: Scratch.translate("registration"), value: 0 },
+							{ text: Scratch.translate("login"), value: 1 },
+						]
+					},
+				},
 			};
 		}
 	}
