@@ -213,5 +213,11 @@
 	const discovery = new CloudLinkDelta_Discovery();
 	Scratch.extensions.register(discovery);
 	Scratch.vm.runtime.ext_cldelta_discovery = discovery;
+
+	// Register plugin with core
+	if (!core.plugins.includes("discovery")) {
+		core.plugins.push("discovery");
+	}
+
 	console.log("CLΔ Discovery plugin loaded.");
 })(Scratch);
