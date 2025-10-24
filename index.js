@@ -82,130 +82,357 @@
 				color1: "#0F7EBD",
 				blocks: [
 					{
-						blockType: Scratch.BlockType.LABEL,
-						text: "Configuration",
+                        opcode: "my_global_id",
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: Scratch.translate("my global id"),
 					},
+					"---",
 					{
-						opcode: "setDiscoveryServer",
+						opcode: "use_discovery_server",
 						blockType: Scratch.BlockType.COMMAND,
-						text: "Use [SERVER] as discovery server",
+						text: Scratch.translate("use designation [DESIGNATION] for discovery"),
 						arguments: {
-							SERVER: {
+							DESIGNATION: {
 								type: Scratch.ArgumentType.STRING,
-								defaultValue: "ws://localhost:3000",
+								defaultValue: "US-NKY-1",
 							},
 						},
 					},
 					"---",
 					{
-						blockType: Scratch.BlockType.LABEL,
-						text: "Server info",
-					},
-					{
-						opcode: "getServerDesignation",
-						blockType: Scratch.BlockType.REPORTER,
-						text: "global server designation",
-					},
-					{
-						opcode: "getGlobalID",
-						blockType: Scratch.BlockType.REPORTER,
-						text: "my global ID",
-					},
-					"---",
-					{
-						blockType: Scratch.BlockType.LABEL,
-						text: "Resolver",
-					},
-					{
-						opcode: "searchForPeer",
-						blockType: Scratch.BlockType.COMMAND,
-						text: "resolve [NAME]",
+                        opcode: "peer_info",
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: Scratch.translate("peer [PEER] [INFO]"),
 						arguments: {
-							NAME: {
-								type: Scratch.ArgumentType.STRING,
-								defaultValue: "B@designation",
-							},
-						},
-					},
-					{
-						opcode: "searchPeerResults",
-						blockType: Scratch.BlockType.REPORTER,
-						text: "[NAME] [OUTPUT]",
-						arguments: {
-							NAME: {
-								type: Scratch.ArgumentType.STRING,
-								defaultValue: "B@designation",
-							},
-							OUTPUT: {
-								menu: "output",
-								acceptReporters: true,
+							PEER: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "B",
+                            },
+							INFO: {
 								type: Scratch.ArgumentType.NUMBER,
-								defaultValue: "lookup successful?",
-							},
-						},
-					},
-					"---",
-					{
-						blockType: Scratch.BlockType.LABEL,
-						text: "Authentication",
-					},
-					{
-						opcode: "authServer",
-						blockType: Scratch.BlockType.COMMAND,
-						text: "[AUTHMODE] using password [PASSWORD]",
-						arguments: {
-							AUTHMODE: {
-								menu: "authmode",
+								menu: "peerinfo",
 								acceptReporters: false,
-								type: Scratch.ArgumentType.NUMBER,
-								defaultValue: "register",
-							},
-							PASSWORD: {
-								type: Scratch.ArgumentType.STRING,
-								defaultValue: "change me",
-							},
-						},
-					},
-					{
-						opcode: "authResult",
-						blockType: Scratch.BlockType.REPORTER,
-						text: "was [AUTHRESULT] successful?",
-						arguments: {
-							AUTHRESULT: {
-								menu: "authresult",
-								acceptReporters: false,
-								type: Scratch.ArgumentType.NUMBER,
-								defaultValue: "registration",
+								defaultValue: "online?",
 							}
 						}
-					},
+                    },
+					{
+                        opcode: "query_peer",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate("query peer [PEER]"),
+                        arguments: {
+                            PEER: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "B",
+                            },
+                        },
+                    },
 					"---",
 					{
-
-					}
+                        opcode: "is_lobby_host",
+                        blockType: Scratch.BlockType.BOOLEAN,
+                        text: Scratch.translate("am I the lobby host?"),
+                    },
+                    {
+                        opcode: "init_host_mode",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "host a lobby named [LOBBY] with player limit: [PEERS] password: [PASSWORD] locked: [LOCK] hidden: [HIDDEN]"
+                        ),
+                        arguments: {
+                            LOBBY: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "DemoLobby",
+                            },
+                            PEERS: {
+                                type: Scratch.ArgumentType.NUMBER,
+                                defaultValue: "-1",
+                            },
+                            PASSWORD: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "",
+                            },
+                            LOCK: {
+                                type: Scratch.ArgumentType.BOOLEAN,
+                                defaultValue: false,
+                            },
+                            HIDDEN: {
+                                type: Scratch.ArgumentType.BOOLEAN,
+                                defaultValue: false,
+                            },
+                        },
+                    },
+                    {
+                        opcode: "set_lock_flag",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "set locked access to [LOCK]"
+                        ),
+                        arguments: {
+                            LOCK: {
+                                type: Scratch.ArgumentType.BOOLEAN,
+                                defaultValue: false,
+                            },
+                        },
+                    },
+                    {
+                        opcode: "set_player_limit_value",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "set the player limit to [LIMIT]"
+                        ),
+                        arguments: {
+                            LIMIT: {
+                                type: Scratch.ArgumentType.NUMBER,
+                                defaultValue: "-1",
+                            },
+                        },
+                    },
+                    {
+                        opcode: "set_password_value",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "set the lobby password to [PASSWORD]"
+                        ),
+                        arguments: {
+                            PASSWORD: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "change me",
+                            },
+                        },
+                    },
+                    {
+                        opcode: "kick_peer_from_lobby",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "kick [PEER] from the lobby"
+                        ),
+                        arguments: {
+                            PEER: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "B",
+                            },
+                        },
+                    },
+                    {
+                        opcode: "transfer_ownership",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "transfer ownership of the lobby to [PEER]"
+                        ),
+                        arguments: {
+                            PEER: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "B",
+                            },
+                        },
+                    },
+                    {
+                        opcode: "close_lobby",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "close lobby"
+                        ),
+                    },
+					"---",
+					{
+                        opcode: "current_lobby",
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: Scratch.translate("current lobby"),
+                    },
+                    {
+                        opcode: "lobby_list",
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: Scratch.translate("lobby list"),
+                    },
+                    {
+                        opcode: "query_lobbies",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate("refresh public lobbies list"),
+                    },
+					{
+                        opcode: "lobby_info",
+                        blockType: Scratch.BlockType.REPORTER,
+                        text: Scratch.translate("lobby [LOBBY] [INFO]"),
+						arguments: {
+							LOBBY: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "DemoLobby",
+                            },
+							INFO: {
+								type: Scratch.ArgumentType.NUMBER,
+								menu: "lobbyinfo",
+								acceptReporters: false,
+								defaultValue: "host",
+							}
+						}
+                    },
+                    {
+                        opcode: "query_lobby",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate("query lobby [LOBBY]"),
+                        arguments: {
+                            LOBBY: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "DemoLobby",
+                            },
+                        },
+                    },
+					"---",
+					{
+                        opcode: "init_peer_mode",
+                        blockType: Scratch.BlockType.COMMAND,
+                        text: Scratch.translate(
+                            "join lobby [LOBBY] with password: [PASSWORD]"
+                        ),
+                        arguments: {
+                            LOBBY: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "DemoLobby",
+                            },
+                            PASSWORD: {
+                                type: Scratch.ArgumentType.STRING,
+                                defaultValue: "",
+                            },
+                        },
+                    },
 				],
 				menus: {
-					output: {
+					lobbyinfo: {
 						items: [
-							{ text: Scratch.translate("lookup successful?"), value: 0 },
-							{ text: Scratch.translate("currently online?"), value: 1 },
-							{ text: Scratch.translate("global session ID"), value: 2 },
-						]
+							{
+								text: Scratch.translate("host"),
+								value: 0,
+							},
+							{
+								text: Scratch.translate("current player limit"),
+								value: 1,
+							},
+							{
+								text: Scratch.translate("current player count"),
+								value: 2,
+							},
+							{
+								text: Scratch.translate("metadata"),
+								value: 3,
+							},
+							{
+								text: Scratch.translate("hidden?"),
+								value: 4,
+							},
+							{
+								text: Scratch.translate("password required?"),
+								value: 5,
+							},
+						],
 					},
-					authmode: {
+					peerinfo: {
 						items: [
-							{ text: Scratch.translate("register"), value: 0 },
-							{ text: Scratch.translate("login"), value: 1 },
-						]
-					},
-					authresult: {
-						items: [
-							{ text: Scratch.translate("registration"), value: 0 },
-							{ text: Scratch.translate("login"), value: 1 },
-						]
-					},
+							{
+								text: Scratch.translate("online?"),
+								value: 0,
+							},
+							{
+								text: Scratch.translate("hosting a lobby?"),
+								value: 1,
+							},
+							{
+								text: Scratch.translate("member of a lobby?"),
+								value: 2,
+							},
+							{
+								text: Scratch.translate("current lobby"),
+								value: 3,
+							},
+							{
+								text: Scratch.translate("designation"),
+								value: 4,
+							},
+							{
+								text: Scratch.translate("global id"),
+								value: 5,
+							},
+						],
+					}
 				},
 			};
+		}
+
+		my_global_id() {
+			// TODO
+			return "";
+		}
+
+		use_discovery_server({DESIGNATION}) {
+			// TODO
+		}
+
+		peer_info({PEER, INFO}) {
+			// TODO
+		}
+
+		query_peer({PEER}) {
+			// TODO
+		}
+
+		is_lobby_host() {
+			// TODO
+			return false;
+		}
+
+		init_host_mode({LOBBY, PEERS, PASSWORD, LOCK, HIDDEN}) {
+			// TODO
+		}
+
+		set_lock_flag({LOCK}) {
+			// TODO
+		}
+
+		set_player_limit_value({LIMIT}) {
+			// TODO
+		}
+
+		set_password_value({PASSWORD}) {
+			// TODO
+		}
+
+		kick_peer_from_lobby({PEER}) {
+			// TODO
+		}
+
+		transfer_ownership({PEER}) {
+			// TODO
+		}
+
+		close_lobby() {
+			// TODO
+		}
+
+		current_lobby() {
+			// TODO
+			return "";
+		}
+
+		lobby_list() {
+			// TODO
+			return "[]";
+		}
+
+		query_lobbies() {
+			// TODO
+		}
+
+		lobby_info({LOBBY, INFO}) {
+			// TODO
+			return "";
+		}
+
+		query_lobby({LOBBY}) {
+			// TODO
+		}
+
+		init_peer_mode({LOBBY, PASSWORD}) {
+			// TODO
 		}
 	}
 
