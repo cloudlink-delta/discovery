@@ -191,21 +191,24 @@
               DESIGNATION: args.string('US-NKY-1')
             }
           ),
-		  opcodes.command(
+          opcodes.command(
             'setLobbyListOutput',
             'store the lobby list in [LIST]',
             {
               LIST: args.string('my list')
             }
           ),
-		  opcodes.boolean('isDiscoveryServicesEnabled', 'are discovery services enabled?'),
-		  opcodes.command(
-			'toggleDiscoveryServices',
-			'[ENABLER] discovery services',
-			{
-			  ENABLER: args.string('enable', { menu: 'enabler' })
-			}
-		  ),
+          opcodes.boolean(
+            'isDiscoveryServicesEnabled',
+            'are discovery services enabled?'
+          ),
+          opcodes.command(
+            'toggleDiscoveryServices',
+            '[ENABLER] discovery services',
+            {
+              ENABLER: args.string('enable', { menu: 'enabler' })
+            }
+          ),
           opcodes.separator(),
 
           // Status
@@ -256,10 +259,10 @@
               PASSWORD: args.string('change me'),
               LOCK: args.boolean(false),
               HIDDEN: args.boolean(false),
-			  METADATA: args.string('...'),
+              METADATA: args.string('...')
             }
           ),
-		  opcodes.command('closeLobby', 'close lobby'),
+          opcodes.command('closeLobby', 'close lobby'),
           opcodes.command(
             'joinLobby',
             'join lobby [LOBBY] with password: [PASSWORD]',
@@ -268,7 +271,7 @@
               PASSWORD: args.string('change me')
             }
           ),
-		  opcodes.command('leaveLobby', 'leave lobby'),
+          opcodes.command('leaveLobby', 'leave lobby'),
 
           opcodes.separator(),
 
@@ -276,6 +279,9 @@
           opcodes.label('Lobby admin'),
           opcodes.command('updateLockFlag', '[LOCK] access to the lobby', {
             LOCK: args.string('lock', { menu: 'lockflag' })
+          }),
+          opcodes.command('updateHiddenFlag', '[VISIBILITY] the lobby', {
+            VISIBILITY: args.string('show', { menu: 'visibilityflag' })
           }),
           opcodes.command(
             'updatePlayerLimit',
@@ -303,7 +309,7 @@
           )
         ],
         menus: {
-		  enabler: {
+          enabler: {
             items: [Scratch.translate('enable'), Scratch.translate('disable')]
           },
           lobbystate: {
@@ -311,6 +317,9 @@
           },
           lockflag: {
             items: [Scratch.translate('lock'), Scratch.translate('unlock')]
+          },
+          visibilityflag: {
+            items: [Scratch.translate('show'), Scratch.translate('hide')]
           },
           lobbyinfo: {
             items: [
@@ -325,7 +334,7 @@
           peerinfo: {
             items: [
               Scratch.translate('online?'),
-			  Scratch.translate('round-trip time from discovery server (ms)'),
+              Scratch.translate('round-trip time from discovery server (ms)'),
               Scratch.translate('hosting a lobby?'),
               Scratch.translate('member of a lobby?'),
               Scratch.translate('current lobby'),
@@ -346,14 +355,14 @@
       if (!this.core) return
     }
 
-	toggleDiscoveryServices({ ENABLER }) {
-		if (!this.core) return
-	}
+    toggleDiscoveryServices ({ ENABLER }) {
+      if (!this.core) return
+    }
 
-	isDiscoveryServicesEnabled() {
-		if (!this.core) return false
-		return false
-	}
+    isDiscoveryServicesEnabled () {
+      if (!this.core) return false
+      return false
+    }
 
     resolvedPeerInfo ({ PEER, INFO }) {
       if (!this.core) return
@@ -373,6 +382,10 @@
     }
 
     updateLockFlag ({ LOCK }) {
+      if (!this.core) return
+    }
+
+    updateHiddenFlag({ VISIBILITY }) {
       if (!this.core) return
     }
 
@@ -396,9 +409,9 @@
       if (!this.core) return
     }
 
-	leaveLobby() {
-		if (!this.core) return
-	}
+    leaveLobby () {
+      if (!this.core) return
+    }
 
     currentLobby () {
       if (!this.core) return
