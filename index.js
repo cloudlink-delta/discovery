@@ -272,7 +272,6 @@
             }
           ),
           opcodes.command('leaveLobby', 'leave lobby'),
-
           opcodes.separator(),
 
           // Lobby admin
@@ -385,7 +384,7 @@
       if (!this.core) return
     }
 
-    updateHiddenFlag({ VISIBILITY }) {
+    updateHiddenFlag ({ VISIBILITY }) {
       if (!this.core) return
     }
 
