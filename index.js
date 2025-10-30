@@ -166,16 +166,19 @@
   class CloudLinkDelta_Discovery {
     constructor () {
       this.id = 'discovery' // used for registerPlugin in core
+      this.requiredFeature = 'discovery'
       this.core
       this.discoveryServerID = null // The Peer ID of the server (e.g., "discovery@US-NKY-1")
       this.lobbyListTarget = null // The Scratch list object for output
       this.instanceId = ''
+      this.preferredID = ''
       this.currentLobby = null // Will store { lobby_id, host, ... }
       this.amIHost = false
+      this.amIPeer = false
       this.lobbyListCache = [] // For the LOBBY_LIST response
       this.resolvedLobbyInfoCache = new Map() // For LOBBY_INFO responses
-      this.preferredID = ''
-      
+      this.resolvedPeerCache = new Map() // For QUERY_ACK responses
+
       /**
        * @type {boolean}
        * Whether the user *wants* discovery to be active.
@@ -188,19 +191,24 @@
       const handlers = new Map()
       
       // --- Server Responses ---
+      handlers.set('CONFIG_REQUIRED', this._handleConfigRequired)
       handlers.set('CONFIG_PEER_ACK', this._handlePeerAck)
       handlers.set('CONFIG_HOST_ACK', this._handleHostAck)
       handlers.set('LOBBY_LIST', this._handleLobbyList)
       handlers.set('LOBBY_INFO', this._handleLobbyInfo) // Added this
       handlers.set('QUERY_ACK', this._handleQueryAck)   // Added this
       handlers.set('REGISTER_ACK', this._handleRegisterAck) // Added this
+      handlers.set('CLOSE_ACK', this._handleCloseAck)
+      handlers.set('TRANSITION', this._handleTransition)
+      handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
 
       // --- Stubbed Handlers ---
       const stub = () => { console.log('[CLΔ Discovery]  Stub handler called.') }
       
-      handlers.set('LOBBY_EXISTS', stub)
+      
       handlers.set('NEW_LOBBY', stub)
       handlers.set('LOBBY_NOTFOUND', stub)
+      handlers.set('PEER_LEFT', stub)
       handlers.set('PEER_JOIN', stub)
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
@@ -217,13 +225,15 @@
      * @param {Object} core - The core object of the CLΔ framework.
      */
     register (core) {
-      this.core = core
+      const self = this;
+      self.core = core
       
       core.registerPlugin(this)
 
       // --- Bind to the Core's internal JS events ---
-      this.core.callbacks.bind('peer_open', this.onCorePeerOpen.bind(this))
-      this.core.callbacks.bind('peer_connect', this.onPeerConnect.bind(this))
+      self.core.callbacks.bind('peer_open', self.onCorePeerOpen.bind(self))
+      self.core.callbacks.bind('peer_negotiated', self.onPeerConnect.bind(self))
+      self.core.callbacks.bind('peer_disconnect', self.onPeerDisconnect.bind(self))
 
       if (!core.plugins.includes('discovery')) {
         core.plugins.push('discovery')
@@ -232,19 +242,28 @@
     }
 
     onCorePeerOpen (id) {
-      this.instanceId = id // This is our UUID
-      
-      // If enabled, immediately try to connect to the discovery server
-      if (this.isEnabled && this.discoveryServerID) {
-        this.connectToDiscoveryServer()
+      const self = this
+      self.instanceId = id // This is our UUID
+      if (self.isEnabled && self.discoveryServerID) {
+        self.connectToDiscoveryServer()
       }
     }
 
     onPeerConnect (conn) {
+      const self = this
       if (conn.peer === this.discoveryServerID) {
-        console.log(`[CLΔ Discovery]  Connection to server ${this.discoveryServerID} open.`)
-        // Now that we're connected to the server, register our preferred ID
-        this.registerPreferredID()
+        console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} open.`)
+        if (self.preferredID) {
+          self.registerPreferredID()
+        }
+      }
+    }
+
+    onPeerDisconnect (conn) {
+      const self = this
+      if (conn.peer === this.discoveryServerID) {
+        console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} was closed or lost.`)
+        self.toggleDiscoveryServices({ ENABLER: 'disable' })
       }
     }
     
@@ -253,71 +272,94 @@
      * @private
      */
     connectToDiscoveryServer () {
-      if (!this.core || !this.discoveryServerID || !this.core.isPeerConnected()) {
+      const self = this;
+      if (!self.core || !self.discoveryServerID || !self.core.isPeerConnected()) {
         return // Conditions not met
       }
       
-      if (this.core.isOtherPeerConnected({ ID: this.discoveryServerID })) {
-        // Already connected, just register
-        this.registerPreferredID()
+      if (self.core.isOtherPeerConnected({ ID: self.discoveryServerID })) {
+        // Already connected. Do nothing.
+        // onPeerConnect will have already fired.
       } else {
         // Not connected, start the connection
-        console.log(`[CLΔ Discovery] Attempting to connect to server: ${this.discoveryServerID}`)
-        this.core.connectToPeer({ ID: this.discoveryServerID })
+        console.log(`[CLΔ Discovery] Attempting to connect to server: ${self.discoveryServerID}`)
+        self.core.connectToPeer({ ID: self.discoveryServerID })
       }
     }
 
     registerPreferredID () {
-      if (!this.preferredID) {
-        console.warn('[CLΔ Discovery] Cannot register ID: Preferred ID not set.')
-        return
-      }
-      
-      console.log(`[CLΔ Discovery] Registering preferred ID "${this.preferredID}"...`)
-      this.core._send({
+      const self = this;
+      console.log(`[CLΔ Discovery] Registering preferred ID "${self.preferredID}"...`)
+      self.core._send({
         opcode: 'REGISTER', // Stubbed command
-        payload: this.preferredID,
-        target: this.discoveryServerID
+        payload: self.preferredID,
+        target: self.discoveryServerID
       })
     }
 
     // --- Opcode Handlers ---
     
-    _handleLobbyList (packet, fromPeerId) {
+    _handleLobbyList (packet, _) {
+      const self = this
       const { payload } = packet
       console.log(`[CLΔ Discovery] Received lobby list with ${payload.length} lobbies.`)
-      this.lobbyListCache = payload
+      self.lobbyListCache = payload
       
-      if (this.lobbyListTarget) {
-        this.lobbyListTarget.value = this.lobbyListCache
+      if (self.lobbyListTarget) {
+        self.lobbyListTarget.value = self.lobbyListCache
       }
     }
 
-    _handleLobbyInfo (packet, fromPeerId) {
+    _handleLobbyInfo (packet, _) {
+      const self = this
       const { payload } = packet
-      this.resolvedLobbyInfoCache.set(payload.lobby_id, payload)
+      self.resolvedLobbyInfoCache.set(payload.lobby_id, payload)
     }
 
-    _handleQueryAck (packet, fromPeerId) {
+    _handleQueryAck (packet, _) {
+      const self = this
       const { username, uuid } = packet.payload // Assuming this structure
-      this.resolvedPeerCache.set(username, uuid)
+      self.resolvedPeerCache.set(username, uuid)
     }
 
-    _handleRegisterAck (packet, fromPeerId) {
-      console.log(`[CLΔ Discovery] Successfully registered as "${this.preferredID}"`)
+    _handleCloseAck(packet, _) {
+      const self = this
+      console.log(`[CLΔ Discovery] Lobby closed: ${packet.payload}`)
+      if (self.currentLobby.lobby_id === packet.payload) {
+        self.currentLobby = null
+      }
+    }
+
+    _handleTransition(packet, _) {
+      const self = this
+      // Set the current mode to '' (none), 'host', or 'peer'
+      self.amIHost = packet.payload === 'host'
+      self.amIPeer = packet.payload === 'peer'
+    }
+
+    _handleLobbyExists(packet, _) {
+      console.log(`[CLΔ Discovery] Lobby already exists: ${packet.payload}`)
+    }
+
+    _handleRegisterAck (packet, _) {
+      console.log(`[CLΔ Discovery] Successfully registered as "${packet.payload}"`)
     }
     
-    _handleHostAck (packet, fromPeerId) {
+    _handleHostAck (packet, _) {
+      const self = this
       console.log(`[CLΔ Discovery] Successfully hosted lobby: ${packet.payload}`)
-      this.currentLobby = { lobby_id: packet.payload }; // Store basic info
-      this.amIHost = true;
+      self.currentLobby = { lobby_id: packet.payload }; // Store basic info
       // TODO: Trigger a "successfully hosted" hat
     }
 
-    _handlePeerAck (packet, fromPeerId) {
+    _handleConfigRequired(_, __) {
+      console.warn(`[CLΔ Discovery] Configuration required. Must create or join a lobby before doing that.`)
+    }
+
+    _handlePeerAck (packet, _) {
+      const self = this
       console.log(`[CLΔ Discovery] Successfully joined lobby: ${packet.payload}`)
-      this.currentLobby = { lobby_id: packet.payload };
-      this.amIHost = false;
+      self.currentLobby = { lobby_id: packet.payload };
       // TODO: Trigger a "successfully joined" hat
     }
     
@@ -371,10 +413,10 @@
             'is the discovery server online?'
           ),
           opcodes.reporter('myInstanceID', 'my instance id'),
-          opcodes.reporter('currentLobby', 'current lobby'),
+          opcodes.reporter('getCurrentLobby', 'current lobby'),
           opcodes.boolean('isInLobby', 'am I in a lobby?'),
           opcodes.boolean('isLobbyState', 'am I a lobby [STATE]?', {
-            STATE: args.string('host?', { menu: 'lobbystate' })
+            STATE: args.string('host', { menu: 'lobbystate' })
           }),
           opcodes.separator(),
 
@@ -506,30 +548,49 @@
      * This is the "hijacked" createPeer function.
      * It's called by the Core when discovery is enabled.
      */
-    hijackedCreatePeer (args) {
-      this.preferredID = Scratch.Cast.toString(args.ID) // Save the name they want
+    hijackedCreatePeer (id) {
+      const self = this
+      
+      // 1. Save the preferred ID
+      self.preferredID = id
+      if (!self.preferredID) {
+        console.warn('[CLΔ Discovery] createPeer block was run with an empty ID.')
+        return
+      }
+
+      // 2. Generate the UUID
       const uuid = crypto.randomUUID()
       
-      // Call the Core's *internal* create function
-      return this.core._spawnPeer(uuid)
+      // 3. Call the Core's spawn peer function
+      self.core._spawnPeer(uuid)
+      
+      // 4. Now, if we're already connected to the server,
+      //    we can register immediately.
+      //    If not, onCorePeerOpen will handle it.
+      if (self.isDiscoveryServerOnline()) {
+        self.registerPreferredID()
+      }
     }
 
     myInstanceID () {
+      const self = this
       // Return the ID we saved from the 'peer_open' callback
-      return Scratch.Cast.toString(this.instanceId)
+      return Scratch.Cast.toString(self.instanceId)
     }
 
     setDesignation ({ DESIGNATION }) {
-      if (!this.core) return
-      this.discoveryServerID = `discovery@${Scratch.Cast.toString(DESIGNATION)}`
-      console.log(`[CLΔ Discovery]  Server set to: ${this.discoveryServerID}`)
+      const self = this
+      if (!self.core) return
+      self.discoveryServerID = `discovery@${Scratch.Cast.toString(DESIGNATION)}`
+      console.log(`[CLΔ Discovery]  Server set to: ${self.discoveryServerID}`)
     }
 
     setLobbyListOutput ({ LIST }, util) {
+      const self = this
       // Find the Scratch list object and store a reference to it
       const list = util.target.lookupVariableByNameAndType(LIST, 'list')
       if (list) {
-        this.lobbyListTarget = list
+        self.lobbyListTarget = list
         console.log(`[CLΔ Discovery]  Lobby list output set to: ${list.name}`)
       } else {
         console.warn(`[CLΔ Discovery]  Could not find list named: ${LIST}`)
@@ -537,48 +598,56 @@
     }
 
     toggleDiscoveryServices ({ ENABLER }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
 
       const enable = Scratch.Cast.toString(ENABLER) === 'enable'
       
       if (enable) {
-        this.isEnabled = true
+        if (self.isEnabled) return
+        self.isEnabled = true
+
         // --- Hijack the Core's block ---
-        this.core._remap('createPeer', this.hijackedCreatePeer.bind(this))
+        self.core._remap('createPeer', this.hijackedCreatePeer.bind(self))
         
         // If Core is already open, try to connect
-        if (this.core.isPeerConnected()) {
+        if (self.core.isPeerConnected()) {
           this.connectToDiscoveryServer()
         }
       } else {
-        this.isEnabled = false
+        if (!self.isEnabled) return
+        self.isEnabled = false
+
         // --- Restore the Core's original function ---
-        this.core._unmap('createPeer')
+        self.core._unmap('createPeer')
         
         // Disconnect from the server
-        if (this.discoveryServerID && this.core.isOtherPeerConnected({ ID: this.discoveryServerID })) {
-          this.core.disconnectFromPeer({ ID: this.discoveryServerID })
-          console.log(`[CLΔ Discovery]  Disconnected from server: ${this.discoveryServerID}`)
+        if (self.discoveryServerID && self.core.isOtherPeerConnected({ ID: self.discoveryServerID })) {
+          self.core.disconnectFromPeer({ ID: self.discoveryServerID })
+          console.log(`[CLΔ Discovery]  Disconnected from server: ${self.discoveryServerID}`)
         }
       }
     }
 
     isDiscoveryServicesEnabled () {
-      if (!this.core) return false
-      return this.isEnabled
+      const self = this
+      if (!self.core) return false
+      return self.isEnabled
     }
 
     isDiscoveryServerOnline() {
-      if (!this.core || !this.discoveryServerID) return false
-      return this.isEnabled && this.core.isOtherPeerConnected({ ID: this.discoveryServerID })
+      const self = this
+      if (!self.core || !self.discoveryServerID) return false
+      return self.isEnabled && self.core.isOtherPeerConnected({ ID: self.discoveryServerID })
     }
 
     resolvedPeerInfo ({ PEER, INFO }) {
+      const self = this
       const username = Scratch.Cast.toString(PEER)
       const infoType = Scratch.Cast.toString(INFO)
       
       if (infoType === 'instance id') {
-        return this.resolvedPeerCache.get(username) || ''
+        return self.resolvedPeerCache.get(username) || ''
       }
       
       // TODO: Implement other info types
@@ -587,22 +656,19 @@
     }
 
     resolvePeer ({ PEER }) {
-      if (!this.core || !this.isDiscoveryServicesEnabled()) return
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
       
-      this.core._send({
+      self.core._send({
         opcode: 'QUERY', // Stubbed command
         payload: Scratch.Cast.toString(PEER),
-        target: this.discoveryServerID
+        target: self.discoveryServerID
       })
     }
 
-    isLobbyHost () {
-      if (!this.core) return false
-      return false
-    }
-
     hostLobby ({ LOBBY, PEERS, PASSWORD, LOCK, HIDDEN, METADATA }) {
-      if (!this.core || !this.isDiscoveryServicesEnabled()) return
+      const self = this
+      if (!self.core || !this.isDiscoveryServicesEnabled()) return
       
       const packet = {
         opcode: 'CONFIG_HOST',
@@ -614,13 +680,14 @@
           hidden: Scratch.Cast.toBoolean(HIDDEN),
           metadata: Scratch.Cast.toString(METADATA)
         },
-        target: this.discoveryServerID
+        target: self.discoveryServerID
       }
-      this.core._send(packet)
+      self.core._send(packet)
     }
     
     joinLobby ({ LOBBY, PASSWORD }) {
-      if (!this.core || !this.isDiscoveryServicesEnabled()) return
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
       
       const packet = {
         opcode: 'CONFIG_PEER',
@@ -628,91 +695,116 @@
           lobby_id: Scratch.Cast.toString(LOBBY),
           password: Scratch.Cast.toString(PASSWORD)
         },
-        target: this.discoveryServerID
+        target: self.discoveryServerID
       }
-      this.core._send(packet)
+      self.core._send(packet)
     }
     
     refreshLobbyList () {
+      const self = this
       if (!this.core || !this.isDiscoveryServicesEnabled()) return
 
       const packet = {
         opcode: 'LOBBY_LIST',
-        target: this.discoveryServerID
+        target: self.discoveryServerID
       }
-      this.core._send(packet)
+      self.core._send(packet)
     }
 
     resolveLobby ({ LOBBY }) {
-      if (!this.core || !this.isDiscoveryServicesEnabled()) return
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
       const packet = {
         opcode: 'LOBBY_INFO',
         payload: Scratch.Cast.toString(LOBBY),
-        target: this.discoveryServerID
+        target: self.discoveryServerID
       }
-      this.core._send(packet)
+      self.core._send(packet)
     }
 
     updateLockFlag ({ LOCK }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     updateHiddenFlag ({ VISIBILITY }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     updatePlayerLimit ({ LIMIT }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     updateLobbyPassword ({ PASSWORD }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     kickFromLobby ({ PEER }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     transferLobby ({ PEER }) {
-      if (!this.core) return
+      const self = this
+      if (!self.core) return
     }
 
     closeLobby () {
-      if (!this.core) return
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled() || !self.isInLobby()) return
+      if (self.amIPeer) return // Peers must use LEAVE
+      const packet = {
+        opcode: 'CLOSE',
+        target: self.discoveryServerID
+      }
+      self.core._send(packet)
     }
 
     leaveLobby () {
-      if (!this.core || !this.isDiscoveryServicesEnabled() || !this.isInLobby()) return
-      
-      // TODO: "LEAVE_LOBBY" opcode.
-      // For now, we just disconnect from all peers and clear our state.
-      
-      // TODO: Tell Core to disconnect from all lobby peers.
-      
-      this.currentLobby = null
-      this.amIHost = false
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled() || !self.isInLobby()) return
+      if (self.amIHost) return // Hosts must use CLOSE or TRANSFER
+      const packet = {
+        opcode: 'LEAVE',
+        target: self.discoveryServerID
+      }
+      self.core._send(packet)
     }
 
-    currentLobby () {
-      return this.currentLobby ? this.currentLobby.lobby_id : ''
+    getCurrentLobby () {
+      const self = this
+      return self.currentLobby ? self.currentLobby.lobby_id : ''
     }
 
     isInLobby () {
-      return !!this.currentLobby
+      const self = this
+      return !!self.getCurrentLobby()
     }
 
     isLobbyState ({ STATE }) {
-      if (!this.isInLobby()) return false
+      const self = this
+      if (!self.isInLobby()) return false
       const state = Scratch.Cast.toString(STATE)
-      return state === 'host' ? this.amIHost : !this.amIHost
+      switch (state) {
+        case 'host':
+          return self.amIHost
+        case 'peer':
+          return self.amIPeer
+        default:
+          return false
+      }
     }
 
     resolvedLobbyInfo ({ LOBBY, INFO }) {
+      const self = this
       const lobbyId = Scratch.Cast.toString(LOBBY)
       const infoType = Scratch.Cast.toString(INFO)
       
-      const info = this.resolvedLobbyInfoCache.get(lobbyId)
+      const info = self.resolvedLobbyInfoCache.get(lobbyId)
       if (!info) return ''
       
       switch (infoType) {
