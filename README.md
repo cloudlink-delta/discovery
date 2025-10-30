@@ -1,4 +1,4 @@
-![CloudLink Delta](https://github.com/user-attachments/assets/aa2ac9e0-4187-44c4-84be-069242d2b6dc)
+![discovery](https://github.com/user-attachments/assets/71dd9520-859b-4ffb-a468-ddd980ae4fa1)
 
 # CLΔ Discovery plugin library.
 Plugin to find and connect to peer discovery servers for CLΔ Core. 
