@@ -174,6 +174,7 @@
       this.amIHost = false
       this.lobbyListCache = [] // For the LOBBY_LIST response
       this.resolvedLobbyInfoCache = new Map() // For LOBBY_INFO responses
+      this.preferredID = ''
       
       /**
        * @type {boolean}
@@ -506,9 +507,7 @@
      * It's called by the Core when discovery is enabled.
      */
     hijackedCreatePeer (args) {
-      const preferredID = Scratch.Cast.toString(args.ID)
-      this.preferredID = preferredID // Save the name they want
-      
+      this.preferredID = Scratch.Cast.toString(args.ID) // Save the name they want
       const uuid = crypto.randomUUID()
       
       // Call the Core's *internal* create function
