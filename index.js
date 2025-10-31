@@ -221,9 +221,6 @@
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
       handlers.set('PASSWORD_ACK', stub)
-      handlers.set('REGISTER_FAIL', stub) // Added this
-      handlers.set('QUERY_FAIL', stub) // Added this
-
       return handlers
     }
 
