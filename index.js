@@ -353,11 +353,13 @@
     }
 
     _handlePeerLeft(packet, _) {
+      const self = this;
       console.log(`[CLΔ Discovery] Peer ${packet.payload} left the lobby, closing connection.`)
       self.core.disconnectFromPeer({ ID: packet.payload })
     }
 
     _handlePeerJoin(packet, _) {
+      const self = this;
       console.log(`[CLΔ Discovery] Peer ${packet.payload} joined lobby, attempting to establish a connection.`)
       self.core.connectToPeer({ ID: packet.payload })
     }
