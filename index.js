@@ -213,12 +213,11 @@
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
       handlers.set('PEER_LEFT', this._handlePeerLeft)
       handlers.set('PEER_JOIN', this._handlePeerJoin)
+      handlers.set('LOBBY_NOTFOUND', this._handleLobbyNotFound)
+      handlers.set('NEW_LOBBY', this._handleNewLobby)
 
       // --- Stubbed Handlers ---
-      const stub = () => { console.log('[CLΔ Discovery]  Stub handler called.') }
-      
-      handlers.set('NEW_LOBBY', stub)
-      handlers.set('LOBBY_NOTFOUND', stub)
+      const stub = () => { console.log('[CLΔ Discovery] Stub handler called.') }
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
       handlers.set('PASSWORD_ACK', stub)
@@ -316,6 +315,7 @@
       
       if (self.lobbyListTarget) {
         self.lobbyListTarget.value = self.lobbyListCache
+        self.lobbyListTarget._monitorUpToDate = false
       }
     }
 
@@ -370,10 +370,26 @@
       console.log(`[CLΔ Discovery] Peer ${packet.payload} joined lobby, attempting to establish a connection.`)
       self.core.connectToPeer({ ID: packet.payload })
     }
+
+    _handleLobbyNotFound(packet, _) {
+      console.warn(`[CLΔ Discovery] Lobby not found: ${packet.payload}`)
+    }
  
     _handleRegisterAck (packet, _) {
       console.log(`[CLΔ Discovery] Successfully registered as "${packet.payload}"`)
     }
+
+    _handleNewLobby(payload, __) {
+      const self = this
+      if (!self.lobbyListCache.includes(payload)) {
+        self.lobbyListCache.push(payload)
+      }
+      if (self.lobbyListTarget) {
+        self.lobbyListTarget.value = self.lobbyListCache
+        self.lobbyListTarget._monitorUpToDate = false
+      }
+    }
+
 
     _handleLeaveAck(packet, _) {
       const self = this
@@ -647,9 +663,9 @@
       const list = util.target.lookupVariableByNameAndType(LIST, 'list')
       if (list) {
         self.lobbyListTarget = list
-        console.log(`[CLΔ Discovery]  Lobby list output set to: ${list.name}`)
+        console.log(`[CLΔ Discovery] Lobby list output set to: ${list.name}`)
       } else {
-        console.warn(`[CLΔ Discovery]  Could not find list named: ${LIST}`)
+        console.warn(`[CLΔ Discovery] Could not find list named: ${LIST}`)
       }
     }
 
