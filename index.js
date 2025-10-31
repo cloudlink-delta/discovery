@@ -203,10 +203,11 @@
       handlers.set('CONFIG_PEER_ACK', this._handlePeerAck)
       handlers.set('CONFIG_HOST_ACK', this._handleHostAck)
       handlers.set('LOBBY_LIST', this._handleLobbyList)
-      handlers.set('LOBBY_INFO', this._handleLobbyInfo) // Added this
-      handlers.set('QUERY_ACK', this._handleQueryAck)   // Added this
-      handlers.set('REGISTER_ACK', this._handleRegisterAck) // Added this
+      handlers.set('LOBBY_INFO', this._handleLobbyInfo)
+      handlers.set('QUERY_ACK', this._handleQueryAck)
+      handlers.set('REGISTER_ACK', this._handleRegisterAck)
       handlers.set('CLOSE_ACK', this._handleCloseAck)
+      handlers.set('LOBBY_CLOSED', this._handleCloseAck)
       handlers.set('TRANSITION', this._handleTransition)
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
       handlers.set('PEER_LEFT', this._handlePeerLeft)
@@ -338,6 +339,8 @@
       console.log(`[CLΔ Discovery] Lobby closed: ${packet.payload}`)
       if (self.currentLobby.lobby_id === packet.payload) {
         self.currentLobby = null
+        self.amIHost = false
+        self.amIPeer = false
       }
     }
 
@@ -353,11 +356,13 @@
     }
 
     _handlePeerLeft(packet, _) {
+      const self = this;
       console.log(`[CLΔ Discovery] Peer ${packet.payload} left the lobby, closing connection.`)
       self.core.disconnectFromPeer({ ID: packet.payload })
     }
 
     _handlePeerJoin(packet, _) {
+      const self = this;
       console.log(`[CLΔ Discovery] Peer ${packet.payload} joined lobby, attempting to establish a connection.`)
       self.core.connectToPeer({ ID: packet.payload })
     }
