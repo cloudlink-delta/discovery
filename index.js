@@ -207,6 +207,7 @@
       handlers.set('QUERY_ACK', this._handleQueryAck)
       handlers.set('REGISTER_ACK', this._handleRegisterAck)
       handlers.set('CLOSE_ACK', this._handleCloseAck)
+      handlers.set('LEAVE_ACK', this._handleLeaveAck)
       handlers.set('LOBBY_CLOSED', this._handleCloseAck)
       handlers.set('TRANSITION', this._handleTransition)
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
@@ -372,6 +373,16 @@
  
     _handleRegisterAck (packet, _) {
       console.log(`[CLΔ Discovery] Successfully registered as "${packet.payload}"`)
+    }
+
+    _handleLeaveAck(packet, _) {
+      const self = this
+      console.log(`[CLΔ Discovery] Successfully left lobby: ${packet.payload}`)
+      if (self.currentLobby.lobby_id === packet.payload) {
+        self.currentLobby = null
+        self.amIHost = false
+        self.amIPeer = false
+      }
     }
     
     _handleHostAck (packet, _) {
