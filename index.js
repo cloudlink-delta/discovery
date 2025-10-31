@@ -216,10 +216,8 @@
       // --- Stubbed Handlers ---
       const stub = () => { console.log('[CLΔ Discovery]  Stub handler called.') }
       
-      
       handlers.set('NEW_LOBBY', stub)
       handlers.set('LOBBY_NOTFOUND', stub)
-     
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
       handlers.set('PASSWORD_ACK', stub)
@@ -349,6 +347,11 @@
       // Set the current mode to '' (none), 'host', or 'peer'
       self.amIHost = packet.payload === 'host'
       self.amIPeer = packet.payload === 'peer'
+      if (self.amIHost || self.amIPeer) {
+        console.log(`[CLΔ Discovery] Transitioning to mode ${packet.payload}.`)
+      } else {
+        console.log(`[CLΔ Discovery] Reset mode.`)
+      }
     }
 
     _handleLobbyExists(packet, _) {
