@@ -207,6 +207,7 @@
       handlers.set('QUERY_ACK', this._handleQueryAck)   // Added this
       handlers.set('REGISTER_ACK', this._handleRegisterAck) // Added this
       handlers.set('CLOSE_ACK', this._handleCloseAck)
+       handlers.set('LOBBY_CLOSED', this._handleCloseAck)
       handlers.set('TRANSITION', this._handleTransition)
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
       handlers.set('PEER_LEFT', this._handlePeerLeft)
@@ -338,6 +339,8 @@
       console.log(`[CLΔ Discovery] Lobby closed: ${packet.payload}`)
       if (self.currentLobby.lobby_id === packet.payload) {
         self.currentLobby = null
+        self.amIHost = false
+        self.amIPeer = false
       }
     }
 
