@@ -87,6 +87,14 @@
       ...options
     }),
 
+    hat: (opcode, text, options = {}) => ({
+      opcode,
+      blockType: Scratch.BlockType.HAT,
+      text: Scratch.translate(text),
+      isEdgeActivated: false,
+      ...options
+    }),
+
     reporter: (opcode, text, args = {}, options = {}) => ({
       opcode,
       blockType: Scratch.BlockType.REPORTER,
@@ -201,6 +209,8 @@
       handlers.set('CLOSE_ACK', this._handleCloseAck)
       handlers.set('TRANSITION', this._handleTransition)
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
+      handlers.set('PEER_LEFT', this._handlePeerLeft)
+      handlers.set('PEER_JOIN', this._handlePeerJoin)
 
       // --- Stubbed Handlers ---
       const stub = () => { console.log('[CLΔ Discovery]  Stub handler called.') }
@@ -208,8 +218,7 @@
       
       handlers.set('NEW_LOBBY', stub)
       handlers.set('LOBBY_NOTFOUND', stub)
-      handlers.set('PEER_LEFT', stub)
-      handlers.set('PEER_JOIN', stub)
+     
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
       handlers.set('PASSWORD_ACK', stub)
@@ -314,12 +323,14 @@
       const self = this
       const { payload } = packet
       self.resolvedLobbyInfoCache.set(payload.lobby_id, payload)
+      Scratch.vm.runtime.startHats(`cldeltadiscovery_whenLobbyResolveFinishes`)
     }
 
     _handleQueryAck (packet, _) {
       const self = this
-      const { username, uuid } = packet.payload // Assuming this structure
-      self.resolvedPeerCache.set(username, uuid)
+      const username = packet.payload.username
+      self.resolvedPeerCache.set(username, packet.payload)
+      Scratch.vm.runtime.startHats(`cldeltadiscovery_whenPeerResolveFinishes`)
     }
 
     _handleCloseAck(packet, _) {
@@ -338,9 +349,19 @@
     }
 
     _handleLobbyExists(packet, _) {
-      console.log(`[CLΔ Discovery] Lobby already exists: ${packet.payload}`)
+      console.warn(`[CLΔ Discovery] Lobby already exists: ${packet.payload}`)
     }
 
+    _handlePeerLeft(packet, _) {
+      console.log(`[CLΔ Discovery] Peer ${packet.payload} left the lobby, closing connection.`)
+      self.core.disconnectFromPeer({ ID: packet.payload })
+    }
+
+    _handlePeerJoin(packet, _) {
+      console.log(`[CLΔ Discovery] Peer ${packet.payload} joined lobby, attempting to establish a connection.`)
+      self.core.connectToPeer({ ID: packet.payload })
+    }
+ 
     _handleRegisterAck (packet, _) {
       console.log(`[CLΔ Discovery] Successfully registered as "${packet.payload}"`)
     }
@@ -349,7 +370,7 @@
       const self = this
       console.log(`[CLΔ Discovery] Successfully hosted lobby: ${packet.payload}`)
       self.currentLobby = { lobby_id: packet.payload }; // Store basic info
-      // TODO: Trigger a "successfully hosted" hat
+      Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyHosted')
     }
 
     _handleConfigRequired(_, __) {
@@ -360,7 +381,7 @@
       const self = this
       console.log(`[CLΔ Discovery] Successfully joined lobby: ${packet.payload}`)
       self.currentLobby = { lobby_id: packet.payload };
-      // TODO: Trigger a "successfully joined" hat
+      Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyJoined')
     }
     
     // --- Block Implementations ---
@@ -377,7 +398,7 @@
           opcodes.label('Config'),
           opcodes.command(
             'setDesignation',
-            'use designation [DESIGNATION] for discovery',
+            'use peer discovery@[DESIGNATION] for discovery services',
             {
               DESIGNATION: args.string('US-NKY-1')
             }
@@ -422,6 +443,10 @@
 
           // Peer resolver
           opcodes.label('Peer resolver'),
+          opcodes.event(
+            'whenPeerResolveFinishes',
+            'when I finish resolving a peer',
+          ),
           opcodes.command('resolvePeer', 'resolve peer [PEER]', {
             PEER: args.string('B')
           }),
@@ -434,6 +459,10 @@
           // Lobby resolver
           opcodes.label('Lobby resolver'),
           opcodes.command('refreshLobbyList', 'refresh lobby list'),
+          opcodes.event(
+            'whenLobbyResolveFinishes',
+            'when I finish resolving a lobby',
+          ),
           opcodes.command('resolveLobby', 'resolve lobby [LOBBY]', {
             LOBBY: args.string('DemoLobby')
           }),
@@ -449,6 +478,10 @@
 
           // Lobby membership
           opcodes.label('Lobby membership'),
+          opcodes.event(
+            'whenLobbyHosted',
+            'when I host a lobby',
+          ),
           opcodes.command(
             'hostLobby',
             'host a lobby named [LOBBY] with player limit: [PEERS] password: [PASSWORD] locked: [LOCK] hidden: [HIDDEN] metadata: [METADATA]',
@@ -462,6 +495,10 @@
             }
           ),
           opcodes.command('closeLobby', 'close lobby'),
+          opcodes.event(
+            'whenLobbyJoined',
+            'when I join a lobby',
+          ),
           opcodes.command(
             'joinLobby',
             'join lobby [LOBBY] with password: [PASSWORD]',
@@ -532,12 +569,12 @@
           peerinfo: {
             items: [
               Scratch.translate('online?'),
+              Scratch.translate('instance id'),
+              Scratch.translate('designation'),
               Scratch.translate('round-trip time from discovery server (ms)'),
               Scratch.translate('hosting a lobby?'),
               Scratch.translate('member of a lobby?'),
               Scratch.translate('current lobby'),
-              Scratch.translate('designation'),
-              Scratch.translate('instance id')
             ]
           }
         }
@@ -646,13 +683,27 @@
       const username = Scratch.Cast.toString(PEER)
       const infoType = Scratch.Cast.toString(INFO)
       
-      if (infoType === 'instance id') {
-        return self.resolvedPeerCache.get(username) || ''
+      const resolved = self.resolvedPeerCache.get(username)
+      if (!resolved) return ''
+
+      switch (infoType) {
+        case 'online?':
+          return resolved.online ? resolved.online : false
+        case 'designation':
+          return resolved.designation ? resolved.designation : ''
+        case 'instance id':
+          return resolved.instance_id ? resolved.instance_id : ''
+        case 'round-trip time from discovery server (ms)':
+          return resolved.rtt ? resolved.rtt : 0
+        case 'hosting a lobby?':
+          return resolved.is_lobby_host ? resolved.is_lobby_host : false
+        case 'member of a lobby?':
+          return resolved.is_lobby_member ? resolved.is_lobby_member : false
+        case 'current lobby':
+          return resolved.lobby_id ? resolved.lobby_id : ''
+        default:
+          return ''
       }
-      
-      // TODO: Implement other info types
-      // (This will require the QUERY_ACK to return more data)
-      return ''
     }
 
     resolvePeer ({ PEER }) {
