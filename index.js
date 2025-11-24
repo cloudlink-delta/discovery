@@ -268,6 +268,7 @@
       const self = this
       if (conn.peer === this.discoveryServerID) {
         console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} was closed or lost.`)
+        self.core.maskedConnections.delete(self.discoveryServerID) // Unmask
         self.toggleDiscoveryServices({ ENABLER: 'disable' })
       }
     }
@@ -289,6 +290,7 @@
         // Not connected, start the connection
         console.log(`[CLΔ Discovery] Attempting to connect to server: ${self.discoveryServerID}`)
         self.core.connectToPeer({ ID: self.discoveryServerID })
+        self.core.maskedConnections.add(self.discoveryServerID) // Mask this connection so only plugins can talk to it
       }
     }
 
