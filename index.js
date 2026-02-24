@@ -417,10 +417,10 @@
       console.log(`[CLΔ Discovery] Successfully registered as "${packet.payload}"`)
     }
 
-    _handleNewLobby(payload, __) {
+    _handleNewLobby(packet, __) {
       const self = this
-      if (!self.lobbyListCache.includes(payload)) {
-        self.lobbyListCache.push(payload)
+      if (!self.lobbyListCache.includes(packet.payload)) {
+        self.lobbyListCache.push(packet.payload)
       }
       if (self.lobbyListTarget) {
         self.lobbyListTarget.value = self.lobbyListCache
