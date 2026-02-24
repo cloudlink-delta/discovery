@@ -186,6 +186,7 @@
       this.lobbyListCache = [] // For the LOBBY_LIST response
       this.resolvedLobbyInfoCache = new Map() // For LOBBY_INFO responses
       this.resolvedPeerCache = new Map() // For QUERY_ACK responses
+      this.idMapper = new Map()
 
       /**
        * @type {boolean}
@@ -205,9 +206,11 @@
       handlers.set('LOBBY_LIST', this._handleLobbyList)
       handlers.set('LOBBY_INFO', this._handleLobbyInfo)
       handlers.set('QUERY_ACK', this._handleQueryAck)
+      handlers.set('KICK_ACK', this._handleKickAck)
       handlers.set('REGISTER_ACK', this._handleRegisterAck)
       handlers.set('CLOSE_ACK', this._handleCloseAck)
       handlers.set('LEAVE_ACK', this._handleLeaveAck)
+      handlers.set('PASSWORD_ACK', this._handlePasswordAck)
       handlers.set('LOBBY_CLOSED', this._handleCloseAck)
       handlers.set('TRANSITION', this._handleTransition)
       handlers.set('LOBBY_EXISTS', this._handleLobbyExists)
@@ -215,12 +218,13 @@
       handlers.set('PEER_JOIN', this._handlePeerJoin)
       handlers.set('LOBBY_NOTFOUND', this._handleLobbyNotFound)
       handlers.set('NEW_LOBBY', this._handleNewLobby)
+      handlers.set('KICKED', this._handleKicked)
 
       // --- Stubbed Handlers ---
       const stub = () => { console.log('[CLΔ Discovery] Stub handler called.') }
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
-      handlers.set('PASSWORD_ACK', stub)
+      handlers.set('NEW_HOST', stub)
       return handlers
     }
 
@@ -244,6 +248,32 @@
         core.plugins.push('discovery')
         console.log('CLΔ Discovery plugin registered.')
       }
+    }
+
+    /**
+     * Creates a merged map of username to instance ID and instance ID to username
+     * @returns {Map<string, string>} A map of username to instance ID and instance ID to username
+     */
+    mapper() {
+      const self = this;
+      const usernameToId = new Map(
+        [...self.resolvedPeerCache].map(([u, o]) => [u, String(o.instance_id)])
+      )
+
+      const idToUsername = new Map(
+        [...self.resolvedPeerCache].map(([u, o]) => [String(o.instance_id), u])
+      )
+
+      // Merge the two maps
+      let output = new Map();
+      for (let [k, v] of usernameToId) {
+        output.set(k, v);
+      }
+      for (let [k, v] of idToUsername) {
+        output.set(k, v);
+      }
+
+      return output
     }
 
     onCorePeerOpen (id) {
@@ -325,6 +355,15 @@
       Scratch.vm.runtime.startHats(`cldeltadiscovery_whenLobbyResolveFinishes`)
     }
 
+    _handleKickAck(packet, _) {
+      const successful = packet.payload
+      if (successful) {
+        console.log(`[CLΔ Discovery] Kick user from lobby was successful.`)
+      } else {
+        console.log(`[CLΔ Discovery] Kick user from lobby failed.`)
+      }
+    }
+
     _handleQueryAck (packet, _) {
       const self = this
       const username = packet.payload.username
@@ -388,7 +427,30 @@
         self.lobbyListTarget._monitorUpToDate = false
       }
     }
+    
+    _handleKicked(_, __) {
+      const self = this
+      console.log(`[CLΔ Discovery] Kicked from lobby.`)
+      self.core.destroyPeer()
+    }
 
+    _handleNewPeer(payload, __) {
+      const self = this
+      if (!self.lobbyListCache.includes(payload)) {
+        self.lobbyListCache.push(payload)
+      }
+      if (self.lobbyListTarget) {
+        self.lobbyListTarget.value = self.lobbyListCache
+        self.lobbyListTarget._monitorUpToDate = false
+      }
+
+      // Connect to the new peer
+      self.core.connectToPeer({ ID: payload })
+    }
+
+    _handlePasswordAck(_, __) {
+      console.log(`[CLΔ Discovery] Lobby password configuration change was acknowledged.`)
+    }
 
     _handleLeaveAck(packet, _) {
       const self = this
@@ -680,6 +742,9 @@
 
         // --- Hijack the Core's block ---
         self.core._remap('createPeer', this.hijackedCreatePeer.bind(self))
+
+        // Enable remapper
+        self.core.registerMapper(this)
         
         // If Core is already open, try to connect
         if (self.core.isPeerConnected()) {
@@ -697,6 +762,9 @@
           self.core.disconnectFromPeer({ ID: self.discoveryServerID })
           console.log(`[CLΔ Discovery]  Disconnected from server: ${self.discoveryServerID}`)
         }
+
+        // Disable remapper
+        self.core.removeMapper()
       }
     }
 
@@ -810,32 +878,74 @@
 
     updateLockFlag ({ LOCK }) {
       const self = this
-      if (!self.core) return
+      const locked = Scratch.Cast.toBoolean(LOCK)
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: locked ? 'LOCK' : 'UNLOCK',
+        target: self.discoveryServerID
+      }
+      self.core._send(packet)
     }
 
     updateHiddenFlag ({ VISIBILITY }) {
       const self = this
-      if (!self.core) return
+      const visible = Scratch.Cast.toBoolean(VISIBILITY)
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: visible ? 'SHOW' : 'HIDE',
+        target: self.discoveryServerID
+      }
+      self.core._send(packet)
     }
 
     updatePlayerLimit ({ LIMIT }) {
       const self = this
-      if (!self.core) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: 'SIZE',
+        target: self.discoveryServerID,
+        payload: Scratch.Cast.toNumber(LIMIT)
+      }
+      self.core._send(packet)
     }
 
     updateLobbyPassword ({ PASSWORD }) {
       const self = this
-      if (!self.core) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: 'PASSWORD',
+        target: self.discoveryServerID,
+        payload: Scratch.Cast.toString(PASSWORD)
+      }
+      self.core._send(packet)
     }
 
     kickFromLobby ({ PEER }) {
       const self = this
-      if (!self.core) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: 'KICK',
+        target: self.discoveryServerID,
+        payload: Scratch.Cast.toString(PEER)
+      }
+      self.core._send(packet)
     }
 
     transferLobby ({ PEER }) {
       const self = this
-      if (!self.core) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      const packet = {
+        opcode: 'TRANSFER',
+        target: self.discoveryServerID,
+        payload: Scratch.Cast.toString(PEER)
+      }
+      self.core._send(packet)
     }
 
     closeLobby () {
