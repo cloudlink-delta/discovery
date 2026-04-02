@@ -516,27 +516,37 @@
         return;
       }
 
-      console.log('[CLΔ Discovery] Peer ' + self.core._prettyPeer(fromPeerId) + ' is defined as "' + name + '@' + (designation || 'unknown') + '".');
+      console.log('[CLΔ Discovery] Peer ' + self.core._prettyPeer(fromPeerId) + ' says HELLO as "' + name + '@' + (designation || 'unknown') + '".');
       
-      // Construct a cache entry similar to what QUERY_ACK provides
-      const cacheEntry = {
+      // Information we know for sure from this HELLO packet
+      const authoritativeInfo = {
         online: true,
         username: name,
         designation: designation,
-        instance_id: fromPeerId,
-        is_lobby_member: false, // We don't know this from HELLO
-        is_lobby_host: false,   // We don't know this from HELLO
-        is_in_lobby: false,     // We don't know this from HELLO
-        lobby_id: '',           // We don't know this from HELLO
-        rtt: 0                  // We don't know this from HELLO
+        instance_id: fromPeerId
       };
 
-      // Store by plain username
-      self.resolvedPeerCache.set(name, cacheEntry);
+      // Default values for info we DON'T know from HELLO.
+      // These will only be used if no entry exists.
+      const defaultInfo = {
+        is_lobby_member: false,
+        is_lobby_host: false,
+        is_in_lobby: false,
+        lobby_id: '',
+        rtt: 0
+      };
 
-      // If a designation is present, also store by the full "username@designation" string
+      // Merge new info with existing entry for the plain username
+      const existingEntry = self.resolvedPeerCache.get(name);
+      const newEntry = { ...defaultInfo, ...(existingEntry || {}), ...authoritativeInfo };
+      self.resolvedPeerCache.set(name, newEntry);
+
+      // If a designation is present, do the same for the full "username@designation" key
       if (designation) {
-        self.resolvedPeerCache.set(`${name}@${designation}`, cacheEntry);
+        const fullKey = `${name}@${designation}`;
+        const existingFullEntry = self.resolvedPeerCache.get(fullKey);
+        const newFullEntry = { ...defaultInfo, ...(existingFullEntry || {}), ...authoritativeInfo };
+        self.resolvedPeerCache.set(fullKey, newFullEntry);
       }
     }
     
