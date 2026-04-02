@@ -176,6 +176,7 @@
       this.id = 'discovery' // used for registerPlugin in core
       this.requiredFeature = 'discovery'
       this.core
+      this.discoveryDesignation = null // The designation suffix to use (e.g. "US-NKY-1")
       this.discoveryServerID = null // The Peer ID of the server (e.g., "discovery@US-NKY-1")
       this.lobbyListTarget = null // The Scratch list object for output
       this.instanceId = ''
@@ -219,12 +220,17 @@
       handlers.set('LOBBY_NOTFOUND', this._handleLobbyNotFound)
       handlers.set('NEW_LOBBY', this._handleNewLobby)
       handlers.set('KICKED', this._handleKicked)
+      handlers.set('HELLO', {
+        handler: this._handleHello,
+        requiredFeature: null
+      })
 
       // --- Stubbed Handlers ---
       const stub = () => { console.log('[CLΔ Discovery] Stub handler called.') }
       handlers.set('PASSWORD_REQUIRED', stub)
       handlers.set('PASSWORD_FAIL', stub)
       handlers.set('NEW_HOST', stub)
+      
       return handlers
     }
 
@@ -251,22 +257,56 @@
     }
 
     /**
-     * Creates a merged map of username to instance ID and instance ID to username
-     * @returns {Map<string, string>} A map of username to instance ID and instance ID to username
+     * Formats a peer instance ID into a human-readable string.
+     * @param {string} id The peer instance ID.
+     * @returns {string} The formatted string, e.g., "username@designation (id)".
+     * @private
+     */
+    _prettifyId (id) {
+      for (const peerInfo of this.resolvedPeerCache.values()) {
+        if (peerInfo.instance_id === id) {
+          const name = peerInfo.username || 'unknown'
+          const designation = peerInfo.designation
+          if (designation) {
+            return `${name}@${designation} (${id})`
+          }
+          return `${name} (${id})`
+        }
+      }
+      // Special case for the discovery server itself
+      if (id === this.discoveryServerID) {
+        return `Discovery Server (${id})`
+      }
+      return id // Fallback
+    }
+    /**
+     * Creates a merged map of username to instance ID, username @ designation to ID, and instance ID to username
+     * @returns {Map<string, string>}
      */
     mapper = () => {
       const self = this;
+
+      // SOMEONE@DESIGNATION -> ID
+      const usernameAndDesignationToId = new Map(
+        [...self.resolvedPeerCache].map(([u, o]) => [`${u}@${o.designation}`, String(o.instance_id)])
+      )
+
+      // SOMEONE -> ID
       const usernameToId = new Map(
         [...self.resolvedPeerCache].map(([u, o]) => [u, String(o.instance_id)])
       )
 
+      // ID -> SOMEONE
       const idToUsername = new Map(
         [...self.resolvedPeerCache].map(([u, o]) => [String(o.instance_id), u])
       )
 
-      // Merge the two maps
+      // Merge the maps
       let output = new Map();
       for (let [k, v] of usernameToId) {
+        output.set(k, v);
+      }
+      for (let [k, v] of usernameAndDesignationToId) {
         output.set(k, v);
       }
       for (let [k, v] of idToUsername) {
@@ -286,12 +326,24 @@
 
     onPeerConnect (conn) {
       const self = this
+
+      // Register ourselves on the discovery server
       if (conn.peer === this.discoveryServerID) {
         console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} open.`)
-        if (self.preferredID) {
+        if (self.preferredID && self.isDiscoveryServerOnline()) {
           self.registerPreferredID()
         }
       }
+
+      // Advertise our name and designation to the newly connected peer so they can update their cache.
+      self.core._send({
+        opcode: 'HELLO',
+        payload: {
+          name: self.preferredID,
+          designation: self.discoveryDesignation
+        },
+        target: conn.peer
+      })
     }
 
     onPeerDisconnect (conn) {
@@ -300,6 +352,17 @@
         console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} was closed or lost.`)
         self.core.maskedConnections.delete(self.discoveryServerID) // Unmask
         self.toggleDiscoveryServices({ ENABLER: 'disable' })
+      }
+
+      // Clean up resolver cache
+      const disconnectedPeerId = conn.peer
+      for (const [key, value] of self.resolvedPeerCache.entries()) {
+        if (value.instance_id === disconnectedPeerId) {
+          self.resolvedPeerCache.delete(key)
+          console.log(
+            `[CLΔ Discovery] Removed stale cache entry for peer ${self.core._prettyPeer(disconnectedPeerId)}: "${key}"`
+          )
+        }
       }
     }
     
@@ -366,9 +429,25 @@
 
     _handleQueryAck (packet, _) {
       const self = this
-      const username = packet.payload.username
-      self.resolvedPeerCache.set(username, packet.payload)
-      Scratch.vm.runtime.startHats(`cldeltadiscovery_whenPeerResolveFinishes`)
+      const { username, designation } = packet.payload
+      if (username) {
+        // Always store by plain username, for local lookups
+        self.resolvedPeerCache.set(username, packet.payload)
+        
+        // Determine the designation to use for the full key
+        let keyDesignation = designation
+        if (!keyDesignation && self.discoveryServerID) {
+          // If designation is blank in the response, assume it's the one from our config
+          const parts = self.discoveryServerID.split('@')
+          if (parts.length > 1) keyDesignation = parts[1]
+        }
+
+        // If we have a designation (either from response or default), store by the full "username@designation" string
+        if (keyDesignation) {
+          self.resolvedPeerCache.set(`${username}@${keyDesignation}`, packet.payload)
+        }
+      }
+      Scratch.vm.runtime.startHats('cldeltadiscovery_whenPeerResolveFinishes')
     }
 
     _handleCloseAck(packet, _) {
@@ -399,13 +478,13 @@
 
     _handlePeerLeft(packet, _) {
       const self = this;
-      console.log(`[CLΔ Discovery] Peer ${packet.payload} left the lobby, closing connection.`)
+      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(packet.payload)} left the lobby, closing connection.`)
       self.core.disconnectFromPeer({ ID: packet.payload })
     }
 
     _handlePeerJoin(packet, _) {
       const self = this;
-      console.log(`[CLΔ Discovery] Peer ${packet.payload} joined lobby, attempting to establish a connection.`)
+      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(packet.payload)} joined lobby, attempting to establish a connection.`)
       self.core.connectToPeer({ ID: packet.payload })
     }
 
@@ -425,6 +504,39 @@
       if (self.lobbyListTarget) {
         self.lobbyListTarget.value = self.lobbyListCache
         self.lobbyListTarget._monitorUpToDate = false
+      }
+    }
+
+    _handleHello(packet, fromPeerId) {
+      const self = this
+      const { name, designation } = packet.payload;
+
+      if (!name) {
+        console.warn('[CLΔ Discovery] Received HELLO from ' + self.core._prettyPeer(fromPeerId) + ' with no name.');
+        return;
+      }
+
+      console.log('[CLΔ Discovery] Peer ' + self.core._prettyPeer(fromPeerId) + ' is defined as "' + name + '@' + (designation || 'unknown') + '".');
+      
+      // Construct a cache entry similar to what QUERY_ACK provides
+      const cacheEntry = {
+        online: true,
+        username: name,
+        designation: designation,
+        instance_id: fromPeerId,
+        is_lobby_member: false, // We don't know this from HELLO
+        is_lobby_host: false,   // We don't know this from HELLO
+        is_in_lobby: false,     // We don't know this from HELLO
+        lobby_id: '',           // We don't know this from HELLO
+        rtt: 0                  // We don't know this from HELLO
+      };
+
+      // Store by plain username
+      self.resolvedPeerCache.set(name, cacheEntry);
+
+      // If a designation is present, also store by the full "username@designation" string
+      if (designation) {
+        self.resolvedPeerCache.set(`${name}@${designation}`, cacheEntry);
       }
     }
     
@@ -714,7 +826,8 @@
     setDesignation ({ DESIGNATION }) {
       const self = this
       if (!self.core) return
-      self.discoveryServerID = `discovery@${Scratch.Cast.toString(DESIGNATION)}`
+      self.discoveryDesignation = Scratch.Cast.toString(DESIGNATION)
+      self.discoveryServerID = `discovery@${self.discoveryDesignation}`
       console.log(`[CLΔ Discovery]  Server set to: ${self.discoveryServerID}`)
     }
 
@@ -740,6 +853,9 @@
         if (self.isEnabled) return
         self.isEnabled = true
 
+        // --- Register prettifier ---
+        self.core.registerPrettifier(self, self._prettifyId.bind(self))
+
         // --- Hijack the Core's block ---
         self.core._remap('createPeer', this.hijackedCreatePeer.bind(self))
 
@@ -753,6 +869,14 @@
       } else {
         if (!self.isEnabled) return
         self.isEnabled = false
+
+        // --- Remove prettifier ---
+        self.core.removePrettifier()
+
+        // Clear the entire resolver cache
+        self.resolvedLobbyInfoCache.clear()
+        self.resolvedPeerCache.clear()
+        self.idMapper.clear()
 
         // --- Restore the Core's original function ---
         self.core._unmap('createPeer')
@@ -811,7 +935,7 @@
     resolvePeer ({ PEER }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
-      
+
       self.core._send({
         opcode: 'QUERY', // Stubbed command
         payload: Scratch.Cast.toString(PEER),
