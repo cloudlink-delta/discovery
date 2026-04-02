@@ -254,7 +254,7 @@
      * Creates a merged map of username to instance ID and instance ID to username
      * @returns {Map<string, string>} A map of username to instance ID and instance ID to username
      */
-    mapper() {
+    mapper = () => {
       const self = this;
       const usernameToId = new Map(
         [...self.resolvedPeerCache].map(([u, o]) => [u, String(o.instance_id)])
