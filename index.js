@@ -276,7 +276,7 @@
       }
       // Special case for the discovery server itself
       if (id === this.discoveryServerID) {
-        return `discovery@${id}`
+        return id
       }
       return id // Fallback
     }
@@ -973,7 +973,7 @@
 
     hostLobby ({ LOBBY, PEERS, PASSWORD, LOCK, HIDDEN, METADATA }) {
       const self = this
-      if (!self.core || !this.isDiscoveryServicesEnabled()) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
       
       const packet = {
         opcode: 'CONFIG_HOST',
@@ -1007,7 +1007,7 @@
     
     refreshLobbyList () {
       const self = this
-      if (!this.core || !this.isDiscoveryServicesEnabled()) return
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
       const packet = {
         opcode: 'LOBBY_LIST',
