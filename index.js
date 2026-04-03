@@ -188,6 +188,7 @@
       this.resolvedLobbyInfoCache = new Map() // For LOBBY_INFO responses
       this.resolvedPeerCache = new Map() // For QUERY_ACK responses
       this.idMapper = new Map()
+      this.lobbyPeers = new Set() // Peers in the current lobby
 
       /**
        * @type {boolean}
@@ -268,14 +269,14 @@
           const name = peerInfo.username || 'unknown'
           const designation = peerInfo.designation
           if (designation) {
-            return `${name}@${designation} (${id})`
+            return `${name}@${designation}`
           }
-          return `${name} (${id})`
+          return `${name}`
         }
       }
       // Special case for the discovery server itself
       if (id === this.discoveryServerID) {
-        return `Discovery Server (${id})`
+        return `discovery@${id}`
       }
       return id // Fallback
     }
@@ -450,10 +451,21 @@
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenPeerResolveFinishes')
     }
 
+    _closeLobbyConnections() {
+      const self = this;
+      // Disconnect from all known lobby peers
+      for (const peerId of self.lobbyPeers) {
+        console.log(`[CLΔ Discovery] Disconnecting from peer ${self.core._prettyPeer(peerId)}`);
+        self.core.disconnectFromPeer({ ID: peerId });
+      }
+      self.lobbyPeers.clear(); // Clear the set
+    }
+
     _handleCloseAck(packet, _) {
       const self = this
       console.log(`[CLΔ Discovery] Lobby closed: ${packet.payload}`)
-      if (self.currentLobby.lobby_id === packet.payload) {
+      if (self.currentLobby && self.currentLobby.lobby_id === packet.payload) {
+        self._closeLobbyConnections()
         self.currentLobby = null
         self.amIHost = false
         self.amIPeer = false
@@ -478,14 +490,18 @@
 
     _handlePeerLeft(packet, _) {
       const self = this;
-      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(packet.payload)} left the lobby, closing connection.`)
-      self.core.disconnectFromPeer({ ID: packet.payload })
+      const peerId = packet.payload;
+      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(peerId)} left the lobby, closing connection.`)
+      self.core.disconnectFromPeer({ ID: peerId })
+      self.lobbyPeers.delete(peerId);
     }
 
     _handlePeerJoin(packet, _) {
       const self = this;
-      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(packet.payload)} joined lobby, attempting to establish a connection.`)
-      self.core.connectToPeer({ ID: packet.payload })
+      const peerId = packet.payload;
+      console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(peerId)} joined lobby, attempting to establish a connection.`)
+      self.core.connectToPeer({ ID: peerId })
+      self.lobbyPeers.add(peerId);
     }
 
     _handleLobbyNotFound(packet, _) {
@@ -553,7 +569,10 @@
     _handleKicked(_, __) {
       const self = this
       console.log(`[CLΔ Discovery] Kicked from lobby.`)
-      self.core.destroyPeer()
+      self._closeLobbyConnections()
+      self.currentLobby = null
+      self.amIHost = false
+      self.amIPeer = false
     }
 
     _handleNewPeer(payload, __) {
@@ -577,11 +596,10 @@
     _handleLeaveAck(packet, _) {
       const self = this
       console.log(`[CLΔ Discovery] Successfully left lobby: ${packet.payload}`)
-      if (self.currentLobby.lobby_id === packet.payload) {
-        self.currentLobby = null
-        self.amIHost = false
-        self.amIPeer = false
-      }
+      self._closeLobbyConnections()
+      self.currentLobby = null
+      self.amIHost = false
+      self.amIPeer = false
     }
     
     _handleHostAck (packet, _) {
