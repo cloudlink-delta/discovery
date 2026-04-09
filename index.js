@@ -202,6 +202,7 @@
       const handlers = new Map()
       
       // --- Server Responses ---
+      handlers.set('DISCOVER', this._handleDiscover)
       handlers.set('CONFIG_REQUIRED', this._handleConfigRequired)
       handlers.set('CONFIG_PEER_ACK', this._handlePeerAck)
       handlers.set('CONFIG_HOST_ACK', this._handleHostAck)
@@ -607,6 +608,12 @@
       console.log(`[CLΔ Discovery] Successfully hosted lobby: ${packet.payload}`)
       self.currentLobby = { lobby_id: packet.payload }; // Store basic info
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyHosted')
+    }
+
+    _handleDiscover(packet, _) {
+      const self = this
+      console.log(`[CLΔ Discovery] Discovery server announced peer ${packet.payload}, attempting to connect...`)
+      self.core.connectToPeer({ ID: packet.payload })
     }
 
     _handleConfigRequired(_, __) {
