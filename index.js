@@ -431,8 +431,10 @@
 
     _handleQueryAck (packet, _) {
       const self = this
-      const { username, designation } = packet.payload
-      if (username) {
+      const { username, designation, online } = packet.payload
+      if (online) {
+        console.log("[CLΔ Discovery] Peer " + PEER + " found.")
+
         // Always store by plain username, for local lookups
         self.resolvedPeerCache.set(username, packet.payload)
         
@@ -448,6 +450,8 @@
         if (keyDesignation) {
           self.resolvedPeerCache.set(`${username}@${keyDesignation}`, packet.payload)
         }
+      } else { 
+        console.log("[CLΔ Discovery] Peer " + username + " not found.")
       }
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenPeerResolveFinishes')
     }
@@ -523,7 +527,7 @@
         self.lobbyListTarget._monitorUpToDate = false
       }
     }
-
+ 
     _handleHello(packet, fromPeerId) {
       const self = this
       const { name, designation } = packet.payload;
@@ -970,6 +974,8 @@
     resolvePeer ({ PEER }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
+
+      console.log("[CLΔ Discovery] Resolving peer: " + PEER)
 
       self.core._send({
         opcode: 'QUERY', // Stubbed command
