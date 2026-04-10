@@ -437,7 +437,7 @@
       self.resolvedPeerCache.set(username, packet.payload)
 
       if (online) {
-        console.log("[CLΔ Discovery] Peer " + PEER + " found.")
+        console.log("[CLΔ Discovery] Peer " + username + " found.")
         
         // Determine the designation to use for the full key
         let keyDesignation = designation
@@ -555,7 +555,9 @@
         is_lobby_host: false,
         is_in_lobby: false,
         lobby_id: '',
-        rtt: 0
+        rtt: 0,
+        is_bridge: false,
+        is_discovery: false
       };
 
       // Merge new info with existing entry for the plain username
@@ -915,6 +917,8 @@
               Scratch.translate('relayed?'),
               Scratch.translate('a classic cloudlink client?'),
               Scratch.translate('relay peer'),
+              Scratch.translate('is a bridge server?'),
+              Scratch.translate('is a discovery server?'),
               Scratch.translate('instance id'),
               Scratch.translate('designation'),
               Scratch.translate('round-trip time from discovery server (ms)'),
@@ -1073,6 +1077,10 @@
           return resolved.is_legacy ? resolved.is_legacy : false
         case 'relay peer':
           return resolved.relay_peer ? resolved.relay_peer : ''
+        case 'is a bridge server?':
+          return resolved.is_bridge ? resolved.is_bridge : false
+        case 'is a discovery server?':
+          return resolved.is_discovery ? resolved.is_discovery : false
         default:
           return ''
       }
