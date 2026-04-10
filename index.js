@@ -789,7 +789,101 @@
             {
               PEER: args.string('B')
             }
-          )
+          ),
+          //opcodes.separator(),
+
+          // Bridge utilites
+          //opcodes.label("Bridge utilities"),
+          opcodes.boolean(
+            "anyBridgesPresent",
+            "am I connected to a bridge server?",
+            {},
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "storeBridgePeers",
+            "store a list of all connected bridges in list [LIST]",
+            {
+              LIST: args.string("my list", {
+                acceptsReporters: true,
+                variableType: "list"
+              })
+            },
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "storeBridgedConnections",
+            "store a list of all bridged connections in list [LIST]",
+            {
+              LIST: args.string("my list", {
+                acceptsReporters: true,
+                variableType: "list"
+              })
+            },
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.separator(),
+          opcodes.boolean(
+            "connectedToClassicRooms",
+            "am I linked to any classic cloudlink rooms?",
+            {},
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "storeClassicRooms",
+            "store a list of all classic cloudlink rooms in list [LIST]",
+            {
+              LIST: args.string("my list", {
+                acceptsReporters: true,
+                variableType: "list"
+              })
+            },
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "joinClassicRooms",
+            "join classic cloudlink room(s) provided in list [LIST]",
+            {
+              LIST: args.string("my list", {
+                acceptsReporters: true,
+                variableType: "list"
+              })
+            },
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "leaveClassicRooms",
+            "leave classic cloudlink room(s) provided in list [LIST]",
+            {
+              LIST: args.string("my list", {
+                acceptsReporters: true,
+                variableType: "list"
+              })
+            },
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
+          opcodes.command(
+            "leaveAllClassicRooms",
+            "leave all classic cloudlink room(s)",
+            {},
+            {
+              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
+            }
+          ),
         ],
         menus: {
           enabler: {
@@ -819,7 +913,7 @@
               Scratch.translate('online?'),
               Scratch.translate('currently connected?'),
               Scratch.translate('relayed?'),
-              Scratch.translate('a legacy cloudlink client?'),
+              Scratch.translate('a classic cloudlink client?'),
               Scratch.translate('relay peer'),
               Scratch.translate('instance id'),
               Scratch.translate('designation'),
@@ -975,7 +1069,7 @@
           return resolved.lobby_id ? resolved.lobby_id : ''
         case 'relayed?':
           return resolved.is_relayed ? resolved.is_relayed : false
-        case 'a legacy cloudlink client?':
+        case 'a classic cloudlink client?':
           return resolved.is_legacy ? resolved.is_legacy : false
         case 'relay peer':
           return resolved.relay_peer ? resolved.relay_peer : ''
