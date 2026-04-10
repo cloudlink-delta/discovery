@@ -432,11 +432,12 @@
     _handleQueryAck (packet, _) {
       const self = this
       const { username, designation, online } = packet.payload
+
+      // Always store by plain username, for local lookups
+      self.resolvedPeerCache.set(username, packet.payload)
+
       if (online) {
         console.log("[CLΔ Discovery] Peer " + PEER + " found.")
-
-        // Always store by plain username, for local lookups
-        self.resolvedPeerCache.set(username, packet.payload)
         
         // Determine the designation to use for the full key
         let keyDesignation = designation
@@ -816,6 +817,10 @@
           peerinfo: {
             items: [
               Scratch.translate('online?'),
+              Scratch.translate('currently connected?'),
+              Scratch.translate('relayed?'),
+              Scratch.translate('a legacy cloudlink client?'),
+              Scratch.translate('relay peer'),
               Scratch.translate('instance id'),
               Scratch.translate('designation'),
               Scratch.translate('round-trip time from discovery server (ms)'),
@@ -954,6 +959,8 @@
       switch (infoType) {
         case 'online?':
           return resolved.online ? resolved.online : false
+        case 'currently connected?':
+          return self.core ? self.core.isOtherPeerConnected({ ID: resolved.instance_id }) : false
         case 'designation':
           return resolved.designation ? resolved.designation : ''
         case 'instance id':
@@ -966,6 +973,12 @@
           return resolved.is_lobby_member ? resolved.is_lobby_member : false
         case 'current lobby':
           return resolved.lobby_id ? resolved.lobby_id : ''
+        case 'relayed?':
+          return resolved.is_relayed ? resolved.is_relayed : false
+        case 'a legacy cloudlink client?':
+          return resolved.is_legacy ? resolved.is_legacy : false
+        case 'relay peer':
+          return resolved.relay_peer ? resolved.relay_peer : ''
         default:
           return ''
       }
