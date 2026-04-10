@@ -189,6 +189,9 @@
       this.resolvedPeerCache = new Map() // For QUERY_ACK responses
       this.idMapper = new Map()
       this.lobbyPeers = new Set() // Peers in the current lobby
+      this.bridgePeers = new Set() // Connected bridge peers
+      this.classicRooms = new Set() // Linked classic rooms
+      this.bridgedConnections = new Set() // Clients connected via bridges
 
       /**
        * @type {boolean}
@@ -200,8 +203,8 @@
     // Called by Core during registration
     getOpcodes () {
       const handlers = new Map()
-      
-      // --- Server Responses ---
+
+      // -- Server --
       handlers.set('DISCOVER', this._handleDiscover)
       handlers.set('CONFIG_REQUIRED', this._handleConfigRequired)
       handlers.set('CONFIG_PEER_ACK', this._handlePeerAck)
@@ -222,16 +225,53 @@
       handlers.set('LOBBY_NOTFOUND', this._handleLobbyNotFound)
       handlers.set('NEW_LOBBY', this._handleNewLobby)
       handlers.set('KICKED', this._handleKicked)
+      handlers.set('PASSWORD_REQUIRED', this._handlePasswordRequired)
+      handlers.set('PASSWORD_FAIL', this._handlePasswordFail)
+      handlers.set('NEW_HOST', this._handleNewHost)
+
+      // -- Peer ---
       handlers.set('HELLO', {
         handler: this._handleHello,
         requiredFeature: null
       })
 
-      // --- Stubbed Handlers ---
-      const stub = () => { console.log('[CLΔ Discovery] Stub handler called.') }
-      handlers.set('PASSWORD_REQUIRED', stub)
-      handlers.set('PASSWORD_FAIL', stub)
-      handlers.set('NEW_HOST', stub)
+      // -- Bridge --
+
+      // Handles connect to classic rooms.
+      handlers.set('LINK_ACK', {
+        handler: this._handleLinkAck,
+        requiredFeature: 'bridge'
+      })
+
+      // Handles disconnect from classic rooms.
+      handlers.set('UNLINK_ACK', {
+        handler: this._handleUnlinkAck,
+        requiredFeature: 'bridge'
+      })
+
+      // Handles joining of classic clients, so packets that are sent to them can be relayed to the correct bridge server.
+      handlers.set('CLASSIC_JOIN', {
+        handler: this._handleClassicJoin,
+        requiredFeature: 'bridge'
+      })
+
+      // Handles leaving of classic clients.
+      handlers.set('CLASSIC_LEFT', {
+        handler: this._handleClassicLeft,
+        requiredFeature: 'bridge'
+      })
+
+      // Handles joining of relayed peers, so packets that are sent to them pass through the correct bridge to be relayed.
+      handlers.set('RELAY_JOIN', {
+        handler: this._handleRelayJoin,
+        requiredFeature: 'bridge'
+      })
+
+      // Handles leaving of relayed peers.
+      handlers.set('RELAY_LEFT', {
+        handler: this._handleRelayLeft,
+        requiredFeature: 'bridge'
+      })
       
       return handlers
     }
@@ -288,19 +328,27 @@
     mapper = () => {
       const self = this;
 
+      // Helper to determine the correct ID to return
+      const getMappedId = (o) => {
+        if (o.is_legacy || o.is_relayed) {
+          return o.username
+        }
+        return String(o.instance_id)
+      }
+
       // SOMEONE@DESIGNATION -> ID
       const usernameAndDesignationToId = new Map(
-        [...self.resolvedPeerCache].map(([u, o]) => [`${u}@${o.designation}`, String(o.instance_id)])
+        [...self.resolvedPeerCache].map(([u, o]) => [`${u}@${o.designation}`, getMappedId(o)])
       )
 
       // SOMEONE -> ID
       const usernameToId = new Map(
-        [...self.resolvedPeerCache].map(([u, o]) => [u, String(o.instance_id)])
+        [...self.resolvedPeerCache].map(([u, o]) => [u, getMappedId(o)])
       )
 
       // ID -> SOMEONE
       const idToUsername = new Map(
-        [...self.resolvedPeerCache].map(([u, o]) => [String(o.instance_id), u])
+        [...self.resolvedPeerCache].map(([u, o]) => [getMappedId(o), u])
       )
 
       // Merge the maps
@@ -318,6 +366,22 @@
       return output
     }
 
+    /**
+     * Redirects packets to the appropriate bridge server if the target is a relayed or classic client.
+     * @param {string} target - The intended destination ID.
+     * @returns {string} - The peer ID to actually route the packet through.
+     */
+    redirector = (target) => {
+      const self = this
+      const peerInfo = self.resolvedPeerCache.get(target)
+      
+      if (peerInfo && (peerInfo.is_legacy || peerInfo.is_relayed) && peerInfo.relay_peer) {
+        return peerInfo.relay_peer
+      }
+      
+      return target
+    }
+
     onCorePeerOpen (id) {
       const self = this
       self.instanceId = id // This is our UUID
@@ -330,22 +394,36 @@
       const self = this
 
       // Register ourselves on the discovery server
-      if (conn.peer === this.discoveryServerID) {
+      if (conn.features.includes('discovery') && conn.peer === this.discoveryServerID) {
         console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} open.`)
         if (self.preferredID && self.isDiscoveryServerOnline()) {
           self.registerPreferredID()
         }
       }
 
-      // Advertise our name and designation to the newly connected peer so they can update their cache.
+      // Handle bridge server
+      if (conn.features.includes('bridge')) {
+        console.log(`[CLΔ Discovery] Peer ${self.core._prettyPeer(conn.peer)} advertised bridge functionality, registering bridge.`)
+        self.bridgePeers.add(conn.peer)
+
+        if (self.classicRooms.size > 0) {
+          self.core._send({
+            opcode: 'LINK',
+            payload: Array.from(self.classicRooms),
+            target: conn.peer
+          })
+        }
+      }
+
+      // Advertise our name and designation to non-server peers so they can update their resolver cache.
       self.core._send({
-        opcode: 'HELLO',
-        payload: {
-          name: self.preferredID,
-          designation: self.discoveryDesignation
-        },
-        target: conn.peer
-      })
+          opcode: 'HELLO',
+          payload: {
+            name: self.preferredID,
+            designation: self.discoveryDesignation
+          },
+          target: conn.peer
+        })
     }
 
     onPeerDisconnect (conn) {
@@ -354,6 +432,12 @@
         console.log(`[CLΔ Discovery] Connection to server ${self.discoveryServerID} was closed or lost.`)
         self.core.maskedConnections.delete(self.discoveryServerID) // Unmask
         self.toggleDiscoveryServices({ ENABLER: 'disable' })
+      }
+      
+      // Clean up bridge server list
+      if (self.bridgePeers.has(conn.peer)) {
+        console.log(`[CLΔ Discovery] Bridge peer ${self.core._prettyPeer(conn.peer)} disconnected, unregistering.`)
+        self.bridgePeers.delete(conn.peer)
       }
 
       // Clean up resolver cache
@@ -634,6 +718,75 @@
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyJoined')
     }
     
+    _handlePasswordRequired(packet, _) {
+      console.log(`[CLΔ Discovery] Lobby requires a password.`)
+    }
+
+    _handlePasswordFail(packet, _) {
+      console.warn(`[CLΔ Discovery] Incorrect lobby password.`)
+    }
+
+    _handleNewHost(packet, _) {
+      const self = this
+      console.log(`[CLΔ Discovery] New host assigned: ${self.core._prettyPeer(packet.payload)}`)
+    }
+
+    _handleLinkAck(packet, _) {
+      console.log(`[CLΔ Discovery] Link request acknowledged.`)
+    }
+
+    _handleUnlinkAck(packet, _) {
+      console.log(`[CLΔ Discovery] Unlink request acknowledged.`)
+    }
+
+    _handleClassicJoin(packet, _) {
+      const self = this
+      self.bridgedConnections.add(packet.payload.username)
+      console.log(`[CLΔ Discovery] Classic client joined bridge: ${packet.payload.username}`)
+      
+      const { username, designation } = packet.payload
+      self.resolvedPeerCache.set(username, packet.payload)
+      if (designation) {
+        self.resolvedPeerCache.set(`${username}@${designation}`, packet.payload)
+      }
+    }
+
+    _handleClassicLeft(packet, _) {
+      const self = this
+      self.bridgedConnections.delete(packet.payload.username)
+      console.log(`[CLΔ Discovery] Classic client left bridge: ${packet.payload.username}`)
+      
+      const { username, designation } = packet.payload
+      self.resolvedPeerCache.delete(username)
+      if (designation) {
+        self.resolvedPeerCache.delete(`${username}@${designation}`)
+      }
+    }
+
+    _handleRelayJoin(packet, _) {
+      const self = this
+      self.bridgedConnections.add(packet.payload.username)
+      console.log(`[CLΔ Discovery] Relayed peer joined relay: ${packet.payload.username}`)
+      
+      const { username, designation } = packet.payload
+      self.resolvedPeerCache.set(username, packet.payload)
+      if (designation) {
+        self.resolvedPeerCache.set(`${username}@${designation}`, packet.payload)
+      }
+    }
+
+    _handleRelayLeft(packet, _) {
+      const self = this
+      self.bridgedConnections.delete(packet.payload.username)
+      console.log(`[CLΔ Discovery] Relayed peer left relay: ${packet.payload.username}`)
+      
+      const { username, designation } = packet.payload
+      self.resolvedPeerCache.delete(username)
+      if (designation) {
+        self.resolvedPeerCache.delete(`${username}@${designation}`)
+      }
+    }
+
     // --- Block Implementations ---
 
     getInfo () {
@@ -792,17 +945,13 @@
               PEER: args.string('B')
             }
           ),
-          //opcodes.separator(),
+          opcodes.separator(),
 
           // Bridge utilites
-          //opcodes.label("Bridge utilities"),
+          opcodes.label("Bridge utilities"),
           opcodes.boolean(
             "anyBridgesPresent",
-            "am I connected to a bridge server?",
-            {},
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
-            }
+            "am I connected to a bridge server?"
           ),
           opcodes.command(
             "storeBridgePeers",
@@ -812,9 +961,6 @@
                 acceptsReporters: true,
                 variableType: "list"
               })
-            },
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
             }
           ),
           opcodes.command(
@@ -825,19 +971,12 @@
                 acceptsReporters: true,
                 variableType: "list"
               })
-            },
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
             }
           ),
           opcodes.separator(),
           opcodes.boolean(
             "connectedToClassicRooms",
-            "am I linked to any classic cloudlink rooms?",
-            {},
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
-            }
+            "am I linked to any classic cloudlink rooms?"
           ),
           opcodes.command(
             "storeClassicRooms",
@@ -847,9 +986,6 @@
                 acceptsReporters: true,
                 variableType: "list"
               })
-            },
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
             }
           ),
           opcodes.command(
@@ -860,9 +996,6 @@
                 acceptsReporters: true,
                 variableType: "list"
               })
-            },
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
             }
           ),
           opcodes.command(
@@ -873,18 +1006,11 @@
                 acceptsReporters: true,
                 variableType: "list"
               })
-            },
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
             }
           ),
           opcodes.command(
             "leaveAllClassicRooms",
-            "leave all classic cloudlink room(s)",
-            {},
-            {
-              hideFromPalette: true, // TODO: OPCODE NOT IMPLEMENTED
-            }
+            "leave all classic cloudlink room(s)"
           ),
         ],
         menus: {
@@ -1004,6 +1130,9 @@
         // Enable remapper
         self.core.registerMapper(this)
         
+        // Enable redirector
+        self.core.registerRedirector(this)
+        
         // If Core is already open, try to connect
         if (self.core.isPeerConnected()) {
           this.connectToDiscoveryServer()
@@ -1019,6 +1148,9 @@
         self.resolvedLobbyInfoCache.clear()
         self.resolvedPeerCache.clear()
         self.idMapper.clear()
+        self.bridgePeers.clear()
+        self.classicRooms.clear()
+        self.bridgedConnections.clear()
 
         // --- Restore the Core's original function ---
         self.core._unmap('createPeer')
@@ -1031,6 +1163,9 @@
 
         // Disable remapper
         self.core.removeMapper()
+
+        // Disable redirector
+        self.core.removeRedirector()
       }
     }
 
@@ -1297,6 +1432,98 @@
           return info.password_required // Assumes this property exists
         default:
           return ''
+      }
+    }
+
+    anyBridgesPresent() {
+      const self = this
+      return self.bridgePeers.size > 0
+    }
+
+    storeBridgePeers({ LIST }, util) {
+      const self = this
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (list) {
+        list.value = Array.from(self.bridgePeers).map(id => self.core._prettyPeer(id))
+        list._monitorUpToDate = false
+      }
+    }
+
+    storeBridgedConnections({ LIST }, util) {
+      const self = this
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (list) {
+        list.value = Array.from(self.bridgedConnections)
+        list._monitorUpToDate = false
+      }
+    }
+
+    connectedToClassicRooms() {
+      const self = this
+      return self.classicRooms.size > 0
+    }
+
+    storeClassicRooms({ LIST }, util) {
+      const self = this
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (list) {
+        list.value = Array.from(self.classicRooms)
+        list._monitorUpToDate = false
+      }
+    }
+
+    joinClassicRooms({ LIST }, util) {
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (!list || list.value.length === 0) return
+
+      const rooms = list.value.map(v => Scratch.Cast.toString(v))
+      rooms.forEach(r => self.classicRooms.add(r))
+
+      for (const bridge of self.bridgePeers) {
+        self.core._send({
+          opcode: 'LINK',
+          payload: rooms,
+          target: bridge
+        })
+      }
+    }
+
+    leaveClassicRooms({ LIST }, util) {
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (!list || list.value.length === 0) return
+
+      const rooms = list.value.map(v => Scratch.Cast.toString(v))
+      rooms.forEach(r => self.classicRooms.delete(r))
+
+      for (const bridge of self.bridgePeers) {
+        self.core._send({
+          opcode: 'UNLINK',
+          payload: rooms,
+          target: bridge
+        })
+      }
+    }
+
+    leaveAllClassicRooms() {
+      const self = this
+      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+      self.classicRooms.clear()
+
+      for (const bridge of self.bridgePeers) {
+        self.core._send({
+          opcode: 'UNLINK',
+          payload: [],
+          target: bridge
+        })
       }
     }
   }
