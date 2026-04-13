@@ -185,6 +185,7 @@
       this.amIHost = false
       this.amIPeer = false
       this.lobbyListCache = [] // For the LOBBY_LIST response
+      this.resolvedLobbyPeersCache = new Map() // For LOBBY_INFO responses
       this.resolvedLobbyInfoCache = new Map() // For LOBBY_INFO responses
       this.resolvedPeerCache = new Map() // For QUERY_ACK responses
       this.idMapper = new Map()
@@ -501,6 +502,8 @@
       const self = this
       const { payload } = packet
       self.resolvedLobbyInfoCache.set(payload.lobby_id, payload)
+      const { peers } = payload
+      self.resolvedLobbyPeersCache.set(payload.lobby_id, peers)
       Scratch.vm.runtime.startHats(`cldeltadiscovery_whenLobbyResolveFinishes`)
     }
 
@@ -811,7 +814,6 @@
             'store the lobby list in [LIST]',
             {
               LIST: args.string('my list', {
-                // Tell Scratch this accepts list menus
                 acceptsReporters: true,
                 variableType: 'list'
               })
@@ -875,6 +877,17 @@
             {
               LOBBY: args.string('DemoLobby'),
               INFO: args.string('current host', { menu: 'lobbyinfo' })
+            }
+          ),
+          opcodes.command(
+            'storeResolvedLobbyPeers',
+            'store a list of all peers in resolved lobby [LOBBY] in list [LIST]',
+            {
+              LOBBY: args.string('DemoLobby'),
+              LIST: args.string('my list', {
+                acceptsReporters: true,
+                variableType: 'list'
+              })
             }
           ),
           opcodes.separator(),
@@ -1145,6 +1158,7 @@
         self.core.removePrettifier()
 
         // Clear the entire resolver cache
+        self.resolvedLobbyPeersCache.clear()
         self.resolvedLobbyInfoCache.clear()
         self.resolvedPeerCache.clear()
         self.idMapper.clear()
@@ -1432,6 +1446,21 @@
           return info.password_required // Assumes this property exists
         default:
           return ''
+      }
+    }
+
+    storeResolvedLobbyPeers({ LOBBY, LIST }, util) {
+      const self = this
+      const lobbyId = Scratch.Cast.toString(LOBBY)
+
+      const peers = self.resolvedLobbyPeersCache.get(lobbyId)
+      if (!peers) return
+
+      const listName = Scratch.Cast.toString(LIST)
+      const list = util.target.lookupVariableByNameAndType(listName, 'list')
+      if (list) {
+        list.value = Array.from(peers).map(e => JSON.stringify(e))
+        list._monitorUpToDate = false
       }
     }
 
