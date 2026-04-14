@@ -192,7 +192,7 @@
       this.lobbyPeers = new Set() // Peers in the current lobby
       this.bridgePeers = new Set() // Connected bridge peers
       this.classicRooms = new Set() // Linked classic rooms
-      this.bridgedConnections = new Set() // Clients connected via bridges
+      this.bridgedConnections = new Map() // Clients connected via bridges
 
       /**
        * @type {boolean}
@@ -250,27 +250,9 @@
         requiredFeature: 'bridge'
       })
 
-      // Handles joining of classic clients, so packets that are sent to them can be relayed to the correct bridge server.
-      handlers.set('CLASSIC_JOIN', {
-        handler: this._handleClassicJoin,
-        requiredFeature: 'bridge'
-      })
-
-      // Handles leaving of classic clients.
-      handlers.set('CLASSIC_LEFT', {
-        handler: this._handleClassicLeft,
-        requiredFeature: 'bridge'
-      })
-
-      // Handles joining of relayed peers, so packets that are sent to them pass through the correct bridge to be relayed.
-      handlers.set('RELAY_JOIN', {
-        handler: this._handleRelayJoin,
-        requiredFeature: 'bridge'
-      })
-
-      // Handles leaving of relayed peers.
-      handlers.set('RELAY_LEFT', {
-        handler: this._handleRelayLeft,
+      // Handles synchronization of relayed/classic clients through a bridge server
+      handlers.set('CLASSIC_ULIST', {
+        handler: this._handleClassicUlist,
         requiredFeature: 'bridge'
       })
       
@@ -391,8 +373,19 @@
       }
     }
 
-    onPeerConnect (conn) {
+    async onPeerConnect (conn) {
       const self = this
+
+      // Advertise our name and designation to peers so they can update their resolver cache.
+      self.core._send({
+        opcode: 'HELLO',
+        payload: {
+          name: self.preferredID,
+          designation: self.discoveryDesignation
+        },
+        target: conn.peer
+      })
+      await self.core._waitForBuffer(conn.peer, 'default')
 
       // Register ourselves on the discovery server
       if (conn.features.includes('discovery') && conn.peer === this.discoveryServerID) {
@@ -415,16 +408,6 @@
           })
         }
       }
-
-      // Advertise our name and designation to non-server peers so they can update their resolver cache.
-      self.core._send({
-          opcode: 'HELLO',
-          payload: {
-            name: self.preferredID,
-            designation: self.discoveryDesignation
-          },
-          target: conn.peer
-        })
     }
 
     onPeerDisconnect (conn) {
@@ -439,6 +422,9 @@
       if (self.bridgePeers.has(conn.peer)) {
         console.log(`[CLΔ Discovery] Bridge peer ${self.core._prettyPeer(conn.peer)} disconnected, unregistering.`)
         self.bridgePeers.delete(conn.peer)
+        self.bridgePeers.clear()
+        self.classicRooms.clear()
+        self.bridgedConnections.clear()
       }
 
       // Clean up resolver cache
@@ -742,51 +728,38 @@
       console.log(`[CLΔ Discovery] Unlink request acknowledged.`)
     }
 
-    _handleClassicJoin(packet, _) {
+    _handleClassicUlist(packet, _) {
       const self = this
-      self.bridgedConnections.add(packet.payload.username)
-      console.log(`[CLΔ Discovery] Classic client joined bridge: ${packet.payload.username}`)
-      
-      const { username, designation } = packet.payload
-      self.resolvedPeerCache.set(username, packet.payload)
-      if (designation) {
-        self.resolvedPeerCache.set(`${username}@${designation}`, packet.payload)
-      }
-    }
+      const { mode, users } = packet.payload || {}
+      if (!users || !Array.isArray(users)) return
 
-    _handleClassicLeft(packet, _) {
-      const self = this
-      self.bridgedConnections.delete(packet.payload.username)
-      console.log(`[CLΔ Discovery] Classic client left bridge: ${packet.payload.username}`)
-      
-      const { username, designation } = packet.payload
-      self.resolvedPeerCache.delete(username)
-      if (designation) {
-        self.resolvedPeerCache.delete(`${username}@${designation}`)
-      }
-    }
-
-    _handleRelayJoin(packet, _) {
-      const self = this
-      self.bridgedConnections.add(packet.payload.username)
-      console.log(`[CLΔ Discovery] Relayed peer joined relay: ${packet.payload.username}`)
-      
-      const { username, designation } = packet.payload
-      self.resolvedPeerCache.set(username, packet.payload)
-      if (designation) {
-        self.resolvedPeerCache.set(`${username}@${designation}`, packet.payload)
-      }
-    }
-
-    _handleRelayLeft(packet, _) {
-      const self = this
-      self.bridgedConnections.delete(packet.payload.username)
-      console.log(`[CLΔ Discovery] Relayed peer left relay: ${packet.payload.username}`)
-      
-      const { username, designation } = packet.payload
-      self.resolvedPeerCache.delete(username)
-      if (designation) {
-        self.resolvedPeerCache.delete(`${username}@${designation}`)
+      if (mode === 'set') {
+        for (const u of users) {
+          self.bridgedConnections.set(u.username, u)
+          self.resolvedPeerCache.set(u.username, u)
+          if (u.designation) {
+            self.resolvedPeerCache.set(`${u.username}@${u.designation}`, u)
+          }
+        }
+        console.log(`[CLΔ Discovery] Processed classic user list with ${users.length} classic client(s).`)
+      } else if (mode === 'add') {
+        for (const u of users) {
+          self.bridgedConnections.set(u.username, u)
+          self.resolvedPeerCache.set(u.username, u)
+          if (u.designation) {
+            self.resolvedPeerCache.set(`${u.username}@${u.designation}`, u)
+          }
+          console.log(`[CLΔ Discovery] Classic client joined bridge: ${u.username}`)
+        }
+      } else if (mode === 'remove') {
+        for (const u of users) {
+          self.bridgedConnections.delete(u.username)
+          self.resolvedPeerCache.delete(u.username)
+          if (u.designation) {
+            self.resolvedPeerCache.delete(`${u.username}@${u.designation}`)
+          }
+          console.log(`[CLΔ Discovery] Classic client left bridge: ${u.username}`)
+        }
       }
     }
 
@@ -1484,7 +1457,7 @@
       const listName = Scratch.Cast.toString(LIST)
       const list = util.target.lookupVariableByNameAndType(listName, 'list')
       if (list) {
-        list.value = Array.from(self.bridgedConnections)
+        list.value = Array.from(self.bridgedConnections.keys())
         list._monitorUpToDate = false
       }
     }
