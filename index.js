@@ -678,6 +678,12 @@
         const newFullEntry = { ...defaultInfo, ...(existingFullEntry || {}), ...authoritativeInfo };
         self.resolvedPeerCache.set(fullKey, newFullEntry);
       }
+
+      if (!self.core.maskedConnections.has(fromPeerId)) {
+        self.core.newestConnected = fromPeerId
+        Scratch.vm.runtime.startHats('cldeltacore_whenPeerConnects')
+        Scratch.vm.runtime.startHats('cldeltacore_whenSpecificPeerConnects')
+      }
     }
     
     _handleKicked(_, __) {
