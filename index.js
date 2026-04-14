@@ -193,6 +193,7 @@
       this.bridgePeers = new Set() // Connected bridge peers
       this.classicRooms = new Set() // Linked classic rooms
       this.bridgedConnections = new Map() // Clients connected via bridges
+      this.ackListeners = new Map() // For waiting on requests
 
       /**
        * @type {boolean}
@@ -464,10 +465,31 @@
       const self = this;
       console.log(`[CLΔ Discovery] Registering preferred ID "${self.preferredID}"...`)
       self.core._send({
-        opcode: 'REGISTER', // Stubbed command
+        opcode: 'REGISTER',
         payload: self.preferredID,
         target: self.discoveryServerID
       })
+    }
+
+    _resolveListener(packet) {
+      if (packet.listener && this.ackListeners.has(packet.listener)) {
+        this.ackListeners.get(packet.listener)(packet.payload)
+        this.ackListeners.delete(packet.listener)
+      }
+    }
+
+    _handleGenericAck(packet, _) {
+      this._resolveListener(packet)
+    }
+
+    _handleLobbyLocked(packet, _) {
+      console.warn(`[CLΔ Discovery] Lobby is locked.`)
+      this._resolveListener(packet)
+    }
+
+    _handleLobbyFull(packet, _) {
+      console.warn(`[CLΔ Discovery] Lobby is full.`)
+      this._resolveListener(packet)
     }
 
     // --- Opcode Handlers ---
@@ -482,6 +504,8 @@
         self.lobbyListTarget.value = self.lobbyListCache
         self.lobbyListTarget._monitorUpToDate = false
       }
+
+      self._resolveListener(packet)
     }
 
     _handleLobbyInfo (packet, _) {
@@ -491,6 +515,8 @@
       const { peers } = payload
       self.resolvedLobbyPeersCache.set(payload.lobby_id, peers)
       Scratch.vm.runtime.startHats(`cldeltadiscovery_whenLobbyResolveFinishes`)
+
+      self._resolveListener(packet)
     }
 
     _handleKickAck(packet, _) {
@@ -500,6 +526,8 @@
       } else {
         console.log(`[CLΔ Discovery] Kick user from lobby failed.`)
       }
+
+      this._resolveListener(packet)
     }
 
     _handleQueryAck (packet, _) {
@@ -528,6 +556,8 @@
         console.log("[CLΔ Discovery] Peer " + username + " not found.")
       }
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenPeerResolveFinishes')
+
+      self._resolveListener(packet)
     }
 
     _closeLobbyConnections() {
@@ -549,6 +579,7 @@
         self.amIHost = false
         self.amIPeer = false
       }
+      self._resolveListener(packet)
     }
 
     _handleTransition(packet, _) {
@@ -565,6 +596,7 @@
 
     _handleLobbyExists(packet, _) {
       console.warn(`[CLΔ Discovery] Lobby already exists: ${packet.payload}`)
+      this._resolveListener(packet)
     }
 
     _handlePeerLeft(packet, _) {
@@ -585,6 +617,7 @@
 
     _handleLobbyNotFound(packet, _) {
       console.warn(`[CLΔ Discovery] Lobby not found: ${packet.payload}`)
+      this._resolveListener(packet)
     }
  
     _handleRegisterAck (packet, _) {
@@ -670,8 +703,9 @@
       self.core.connectToPeer({ ID: payload })
     }
 
-    _handlePasswordAck(_, __) {
+    _handlePasswordAck(packet, _) {
       console.log(`[CLΔ Discovery] Lobby password configuration change was acknowledged.`)
+      this._resolveListener(packet)
     }
 
     _handleLeaveAck(packet, _) {
@@ -681,6 +715,7 @@
       self.currentLobby = null
       self.amIHost = false
       self.amIPeer = false
+      self._resolveListener(packet)
     }
     
     _handleHostAck (packet, _) {
@@ -688,6 +723,7 @@
       console.log(`[CLΔ Discovery] Successfully hosted lobby: ${packet.payload}`)
       self.currentLobby = { lobby_id: packet.payload }; // Store basic info
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyHosted')
+      self._resolveListener(packet)
     }
 
     _handleDiscover(packet, _) {
@@ -705,14 +741,17 @@
       console.log(`[CLΔ Discovery] Successfully joined lobby: ${packet.payload}`)
       self.currentLobby = { lobby_id: packet.payload };
       Scratch.vm.runtime.startHats('cldeltadiscovery_whenLobbyJoined')
+      self._resolveListener(packet)
     }
     
     _handlePasswordRequired(packet, _) {
       console.log(`[CLΔ Discovery] Lobby requires a password.`)
+      this._resolveListener(packet)
     }
 
     _handlePasswordFail(packet, _) {
       console.warn(`[CLΔ Discovery] Incorrect lobby password.`)
+      this._resolveListener(packet)
     }
 
     _handleNewHost(packet, _) {
@@ -722,10 +761,12 @@
 
     _handleLinkAck(packet, _) {
       console.log(`[CLΔ Discovery] Link request acknowledged.`)
+      this._resolveListener(packet)
     }
 
     _handleUnlinkAck(packet, _) {
       console.log(`[CLΔ Discovery] Unlink request acknowledged.`)
+      this._resolveListener(packet)
     }
 
     _handleClassicUlist(packet, _) {
@@ -1138,6 +1179,11 @@
         self.bridgePeers.clear()
         self.classicRooms.clear()
         self.bridgedConnections.clear()
+        
+        for (const resolve of self.ackListeners.values()) {
+          resolve()
+        }
+        self.ackListeners.clear()
 
         // --- Restore the Core's original function ---
         self.core._unmap('createPeer')
@@ -1210,14 +1256,21 @@
 
     resolvePeer ({ PEER }) {
       const self = this
-      if (!self.core || !self.isDiscoveryServicesEnabled()) return
+      if (!self.core || !self.isDiscoveryServicesEnabled() || !self.isDiscoveryServerOnline()) return
 
-      console.log("[CLΔ Discovery] Resolving peer: " + PEER)
+      const peerName = Scratch.Cast.toString(PEER)
+      console.log("[CLΔ Discovery] Resolving peer: " + peerName)
 
-      self.core._send({
-        opcode: 'QUERY', // Stubbed command
-        payload: Scratch.Cast.toString(PEER),
-        target: self.discoveryServerID
+      const listenerId = crypto.randomUUID()
+
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        self.core._send({
+          opcode: 'QUERY',
+          payload: peerName,
+          listener: listenerId,
+          target: self.discoveryServerID
+        })
       })
     }
 
@@ -1225,57 +1278,77 @@
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
       
-      const packet = {
-        opcode: 'CONFIG_HOST',
-        payload: {
-          lobby_id: Scratch.Cast.toString(LOBBY),
-          password: Scratch.Cast.toString(PASSWORD),
-          max_peers: Scratch.Cast.toNumber(PEERS),
-          locked: Scratch.Cast.toBoolean(LOCK),
-          hidden: Scratch.Cast.toBoolean(HIDDEN),
-          metadata: Scratch.Cast.toString(METADATA)
-        },
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'CONFIG_HOST',
+          payload: {
+            lobby_id: Scratch.Cast.toString(LOBBY),
+            password: Scratch.Cast.toString(PASSWORD),
+            max_peers: Scratch.Cast.toNumber(PEERS),
+            locked: Scratch.Cast.toBoolean(LOCK),
+            hidden: Scratch.Cast.toBoolean(HIDDEN),
+            metadata: Scratch.Cast.toString(METADATA)
+          },
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
     
     joinLobby ({ LOBBY, PASSWORD }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
       
-      const packet = {
-        opcode: 'CONFIG_PEER',
-        payload: {
-          lobby_id: Scratch.Cast.toString(LOBBY),
-          password: Scratch.Cast.toString(PASSWORD)
-        },
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'CONFIG_PEER',
+          payload: {
+            lobby_id: Scratch.Cast.toString(LOBBY),
+            password: Scratch.Cast.toString(PASSWORD)
+          },
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
     
     refreshLobbyList () {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'LOBBY_LIST',
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'LOBBY_LIST',
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     resolveLobby ({ LOBBY }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'LOBBY_INFO',
-        payload: Scratch.Cast.toString(LOBBY),
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'LOBBY_INFO',
+          payload: Scratch.Cast.toString(LOBBY),
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     updateLockFlag ({ LOCK }) {
@@ -1283,11 +1356,16 @@
       const locked = Scratch.Cast.toBoolean(LOCK)
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: locked ? 'LOCK' : 'UNLOCK',
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: locked ? 'LOCK' : 'UNLOCK',
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     updateHiddenFlag ({ VISIBILITY }) {
@@ -1295,81 +1373,116 @@
       const visible = Scratch.Cast.toBoolean(VISIBILITY)
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: visible ? 'SHOW' : 'HIDE',
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: visible ? 'SHOW' : 'HIDE',
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     updatePlayerLimit ({ LIMIT }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'SIZE',
-        target: self.discoveryServerID,
-        payload: Scratch.Cast.toNumber(LIMIT)
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'SIZE',
+          target: self.discoveryServerID,
+          listener: listenerId,
+          payload: Scratch.Cast.toNumber(LIMIT)
+        }
+        self.core._send(packet)
+      })
     }
 
     updateLobbyPassword ({ PASSWORD }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'PASSWORD',
-        target: self.discoveryServerID,
-        payload: Scratch.Cast.toString(PASSWORD)
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'PASSWORD',
+          target: self.discoveryServerID,
+          listener: listenerId,
+          payload: Scratch.Cast.toString(PASSWORD)
+        }
+        self.core._send(packet)
+      })
     }
 
     kickFromLobby ({ PEER }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'KICK',
-        target: self.discoveryServerID,
-        payload: Scratch.Cast.toString(PEER)
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'KICK',
+          target: self.discoveryServerID,
+          listener: listenerId,
+          payload: Scratch.Cast.toString(PEER)
+        }
+        self.core._send(packet)
+      })
     }
 
     transferLobby ({ PEER }) {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
 
-      const packet = {
-        opcode: 'TRANSFER',
-        target: self.discoveryServerID,
-        payload: Scratch.Cast.toString(PEER)
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'TRANSFER',
+          target: self.discoveryServerID,
+          listener: listenerId,
+          payload: Scratch.Cast.toString(PEER)
+        }
+        self.core._send(packet)
+      })
     }
 
     closeLobby () {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled() || !self.isInLobby()) return
       if (self.amIPeer) return // Peers must use LEAVE
-      const packet = {
-        opcode: 'CLOSE',
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'CLOSE',
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     leaveLobby () {
       const self = this
       if (!self.core || !self.isDiscoveryServicesEnabled() || !self.isInLobby()) return
       if (self.amIHost) return // Hosts must use CLOSE or TRANSFER
-      const packet = {
-        opcode: 'LEAVE',
-        target: self.discoveryServerID
-      }
-      self.core._send(packet)
+      const listenerId = crypto.randomUUID()
+      return new Promise(resolve => {
+        self.ackListeners.set(listenerId, resolve)
+        const packet = {
+          opcode: 'LEAVE',
+          listener: listenerId,
+          target: self.discoveryServerID
+        }
+        self.core._send(packet)
+      })
     }
 
     getCurrentLobby () {
@@ -1487,13 +1600,20 @@
       const rooms = list.value.map(v => Scratch.Cast.toString(v))
       rooms.forEach(r => self.classicRooms.add(r))
 
+      const promises = []
       for (const bridge of self.bridgePeers) {
-        self.core._send({
-          opcode: 'LINK',
-          payload: rooms,
-          target: bridge
-        })
+        const listenerId = crypto.randomUUID()
+        promises.push(new Promise(resolve => {
+          self.ackListeners.set(listenerId, resolve)
+          self.core._send({
+            opcode: 'LINK',
+            payload: rooms,
+            listener: listenerId,
+            target: bridge
+          })
+        }))
       }
+      return Promise.all(promises)
     }
 
     leaveClassicRooms({ LIST }, util) {
@@ -1506,13 +1626,20 @@
       const rooms = list.value.map(v => Scratch.Cast.toString(v))
       rooms.forEach(r => self.classicRooms.delete(r))
 
+      const promises = []
       for (const bridge of self.bridgePeers) {
-        self.core._send({
-          opcode: 'UNLINK',
-          payload: rooms,
-          target: bridge
-        })
+        const listenerId = crypto.randomUUID()
+        promises.push(new Promise(resolve => {
+          self.ackListeners.set(listenerId, resolve)
+          self.core._send({
+            opcode: 'UNLINK',
+            payload: rooms,
+            listener: listenerId,
+            target: bridge
+          })
+        }))
       }
+      return Promise.all(promises)
     }
 
     leaveAllClassicRooms() {
@@ -1520,13 +1647,20 @@
       if (!self.core || !self.isDiscoveryServicesEnabled()) return
       self.classicRooms.clear()
 
+      const promises = []
       for (const bridge of self.bridgePeers) {
-        self.core._send({
-          opcode: 'UNLINK',
-          payload: [],
-          target: bridge
-        })
+        const listenerId = crypto.randomUUID()
+        promises.push(new Promise(resolve => {
+          self.ackListeners.set(listenerId, resolve)
+          self.core._send({
+            opcode: 'UNLINK',
+            payload: [],
+            listener: listenerId,
+            target: bridge
+          })
+        }))
       }
+      return Promise.all(promises)
     }
   }
 
