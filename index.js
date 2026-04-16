@@ -766,13 +766,25 @@
     }
 
     _handleLinkAck(packet, _) {
+      const self = this
       console.log(`[CLΔ Discovery] Link request acknowledged.`)
-      this._resolveListener(packet)
+      const rooms = packet.payload
+      for (const room of rooms) {
+        console.log(`[CLΔ Discovery] Joined room ${room}.`)
+        self.classicRooms.add(room)
+      }
+      self._resolveListener(packet)
     }
 
     _handleUnlinkAck(packet, _) {
+      const self = this
       console.log(`[CLΔ Discovery] Unlink request acknowledged.`)
-      this._resolveListener(packet)
+      const rooms = packet.payload
+      for (const room of rooms) {
+        console.log(`[CLΔ Discovery] Left room ${room}.`)
+        self.classicRooms.delete(room)
+      }
+      self._resolveListener(packet)
     }
 
     _handleClassicUlist(packet, _) {
@@ -1604,7 +1616,6 @@
       if (!list || list.value.length === 0) return
 
       const rooms = list.value.map(v => Scratch.Cast.toString(v))
-      rooms.forEach(r => self.classicRooms.add(r))
 
       const promises = []
       for (const bridge of self.bridgePeers) {
