@@ -800,7 +800,16 @@
             self.resolvedPeerCache.set(`${u.username}@${u.designation}`, u)
           }
         }
-        console.log(`[CLΔ Discovery] Processed classic user list with ${users.length} classic client(s).`)
+        console.log(`[CLΔ Discovery] There are ${users.length} classic client(s) in the room.`)
+      } else if (mode === 'delete') {
+        for (const u of users) {
+          self.bridgedConnections.delete(u.username)
+          self.resolvedPeerCache.delete(u.username)
+          if (u.designation) {
+            self.resolvedPeerCache.delete(`${u.username}@${u.designation}`)
+          }
+        }
+        console.log(`[CLΔ Discovery] Forgotten ${users.length} classic client(s).`)
       } else if (mode === 'add') {
         for (const u of users) {
           self.bridgedConnections.set(u.username, u)
